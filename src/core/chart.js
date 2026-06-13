@@ -2,7 +2,7 @@
  * Core chart control logic.
  */
 import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, safeString, requireFinite, sleep as _sleep, fetchWithTimeout as _fetchWithTimeout, KNOWN_PATHS } from '../connection.js';
-import { waitForChartReady as _waitForChartReady } from '../wait.js';
+import { waitForChartReady as _waitForChartReady, waitFor as _waitFor } from '../wait.js';
 
 const CHART_API = KNOWN_PATHS.chartApi;
 
@@ -36,6 +36,7 @@ function _resolve(deps) {
     evaluate: deps?.evaluate || _evaluate,
     evaluateAsync: deps?.evaluateAsync || _evaluateAsync,
     waitForChartReady: deps?.waitForChartReady || _waitForChartReady,
+    waitFor: deps?.waitFor || _waitFor,
     sleep: deps?.sleep || _sleep,
     fetch: deps?.fetch || _fetchWithTimeout,
   };
@@ -112,19 +113,22 @@ export async function setType({ chart_type, _deps }) {
 }
 
 export async function manageIndicator({ action, indicator, entity_id, inputs: inputsRaw, _deps }) {
-  const { evaluate, sleep } = _resolve(_deps);
+  const { evaluate, waitFor, sleep } = _resolve(_deps);
   const inputs = inputsRaw ? (typeof inputsRaw === 'string' ? JSON.parse(inputsRaw) : inputsRaw) : undefined;
 
   if (action === 'add') {
     const inputArr = inputs ? Object.entries(inputs).map(([k, v]) => ({ id: k, value: v })) : [];
     const before = await evaluate(`${CHART_API}.getAllStudies().map(function(s) { return s.id; })`);
+    const beforeCount = (before || []).length;
     await evaluate(`
       (function() {
         var chart = ${CHART_API};
         chart.createStudy(${safeString(indicator)}, false, false, ${JSON.stringify(inputArr)});
       })()
     `);
-    await sleep(1500);
+    // Wait until the study actually appears instead of blindly sleeping — returns
+    // as soon as it's added, and caps the wait if it never does.
+    await waitFor(`${CHART_API}.getAllStudies().length > ${beforeCount}`, { timeout: 5000, deps: { evaluate, sleep } });
     const after = await evaluate(`${CHART_API}.getAllStudies().map(function(s) { return s.id; })`);
     const newIds = (after || []).filter(id => !(before || []).includes(id));
     return { success: newIds.length > 0, action: 'add', indicator, entity_id: newIds[0] || null, new_study_count: newIds.length };

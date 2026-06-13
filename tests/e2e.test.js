@@ -1,5 +1,5 @@
 /**
- * Comprehensive E2E tests for all 78 TradingView MCP tools.
+ * Comprehensive E2E tests for all 79 TradingView MCP tools.
  * Requires TradingView Desktop running with --remote-debugging-port=9222
  *
  * Run: node --test tests/e2e.test.js
@@ -61,7 +61,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('TradingView MCP — Full E2E (78 tools)', () => {
+describe('TradingView MCP — Full E2E (79 tools)', () => {
 
   before(async () => {
     try {

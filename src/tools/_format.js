@@ -24,7 +24,10 @@ export function wrap(coreFn, errorExtra) {
     try {
       return jsonResult(await coreFn(args ?? {}));
     } catch (err) {
-      return jsonResult({ success: false, error: err.message, ...errorExtra }, true);
+      const payload = { success: false, error: err.message };
+      if (err.kind) payload.error_kind = err.kind;       // from AppError
+      if (err.hint) payload.hint = err.hint;             // dynamic hint
+      return jsonResult({ ...payload, ...errorExtra }, true); // static errorExtra wins
     }
   };
 }

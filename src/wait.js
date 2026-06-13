@@ -12,6 +12,27 @@ export function normalizeResolution(res) {
   return String(res || '').toUpperCase().trim().replace(/^1(?=[DWM]$)/, '');
 }
 
+/**
+ * Poll a page-side predicate until it is truthy or the timeout elapses, instead
+ * of blindly sleeping a fixed duration. `predicateExpr` is a JS expression
+ * evaluated in the TradingView page; it should become truthy when the action
+ * has completed. Returns true if it became truthy, false on timeout.
+ *
+ * `deps` (evaluate/sleep) are injectable for testing.
+ */
+export async function waitFor(predicateExpr, { timeout = DEFAULT_TIMEOUT, interval = POLL_INTERVAL, deps } = {}) {
+  const evalFn = deps?.evaluate || evaluate;
+  const sleepFn = deps?.sleep || sleep;
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    let ok;
+    try { ok = !!(await evalFn(`!!(${predicateExpr})`)); } catch { ok = false; }
+    if (ok) return true;
+    await sleepFn(interval);
+  }
+  return false;
+}
+
 export async function waitForChartReady(expectedSymbol = null, expectedTf = null, timeout = DEFAULT_TIMEOUT) {
   const start = Date.now();
   let lastBarCount = -1;
