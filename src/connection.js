@@ -1,11 +1,12 @@
 import CDP from 'chrome-remote-interface';
 import { ErrorKind, appError } from './errors.js';
+import { config } from './config.js';
 
 let client = null;
 let targetInfo = null;
 let connecting = null; // in-flight connection promise — shared by concurrent callers
-const CDP_HOST = 'localhost';
-const CDP_PORT = 9222;
+const CDP_HOST = config.cdpHost;
+const CDP_PORT = config.cdpPort;
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
 
@@ -48,7 +49,7 @@ export { KNOWN_PATHS };
 /** Resolve after `ms` milliseconds. Centralizes the setTimeout-Promise idiom. */
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const DEFAULT_FETCH_TIMEOUT = 15000;
+const DEFAULT_FETCH_TIMEOUT = config.fetchTimeoutMs;
 
 /**
  * fetch() with an AbortController timeout so a stalled HTTP request can't hang
@@ -160,7 +161,7 @@ export async function getTargetInfo() {
   return targetInfo;
 }
 
-const DEFAULT_EVAL_TIMEOUT = 30000;
+const DEFAULT_EVAL_TIMEOUT = config.evalTimeoutMs;
 
 export async function evaluate(expression, opts = {}) {
   try {

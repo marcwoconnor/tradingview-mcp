@@ -20,6 +20,8 @@ export function registerDataTools(server) {
 
   server.tool('data_get_equity', 'Get equity curve data from Strategy Tester', {}, wrap(core.getEquity));
 
+  server.tool('data_get_backtest_metrics', 'Get normalized strategy performance metrics derived from the equity curve and trades: total return, max drawdown, per-period Sharpe, volatility, win rate, profit factor, avg win/loss. Computes a consistent schema from TradingView\'s varying report shapes.', {}, wrap(core.getBacktestMetrics));
+
   server.tool('quote_get', 'Get real-time quote data for a symbol (price, OHLC, volume)', {
     symbol: z.string().optional().describe('Symbol to quote (blank = current chart symbol)'),
   }, wrap(core.getQuote));

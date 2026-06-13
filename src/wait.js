@@ -13,6 +13,23 @@ export function normalizeResolution(res) {
 }
 
 /**
+ * Convert a TradingView resolution to its bar interval in seconds.
+ * Handles D/W/M (and "1D" etc.), second resolutions ("30S"), and minute
+ * counts ("1","5","60"). Falls back to 60s for anything unrecognized.
+ */
+export function resolutionToSeconds(res) {
+  const r = normalizeResolution(res);
+  if (r === 'D') return 86400;
+  if (r === 'W') return 604800;
+  if (r === 'M') return 2592000;
+  const sec = /^(\d+)S$/.exec(r);
+  if (sec) return Number(sec[1]);
+  const mins = parseInt(r, 10);
+  if (!Number.isNaN(mins) && mins > 0) return mins * 60;
+  return 60;
+}
+
+/**
  * Poll a page-side predicate until it is truthy or the timeout elapses, instead
  * of blindly sleeping a fixed duration. `predicateExpr` is a JS expression
  * evaluated in the TradingView page; it should become truthy when the action

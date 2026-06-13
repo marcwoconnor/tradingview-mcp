@@ -3,6 +3,7 @@
  */
 import { evaluate as _evaluate, KNOWN_PATHS, safeString } from '../connection.js';
 import { ErrorKind, appError } from '../errors.js';
+import { resolutionToSeconds } from '../wait.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
@@ -65,6 +66,34 @@ function buildGraphicsJS(collectionName, mapKey, filter) {
   `;
 }
 
+/**
+ * Trust signals for a set of OHLCV bars so a consumer knows when not to rely on
+ * them: whether the last bar is still forming (its period hasn't elapsed), how
+ * old the last bar is, and whether there are gaps in the series. Pure/testable;
+ * `nowSec` is injectable for deterministic tests.
+ */
+export function computeOhlcvIntegrity(bars, resolution, nowSec = Math.floor(Date.now() / 1000)) {
+  if (!bars || bars.length === 0) return { resolution: resolution ?? null };
+  const intervalSeconds = resolutionToSeconds(resolution);
+  const last = bars[bars.length - 1];
+  const lastBarAgeSeconds = last.time != null ? nowSec - last.time : null;
+  // The last bar is still forming if we're inside its interval window.
+  const forming = lastBarAgeSeconds != null && lastBarAgeSeconds >= 0 && lastBarAgeSeconds < intervalSeconds;
+  let gaps = 0;
+  for (let i = 1; i < bars.length; i++) {
+    const dt = bars[i].time - bars[i - 1].time;
+    if (dt > intervalSeconds * 1.5) gaps++;
+  }
+  return {
+    resolution: resolution ?? null,
+    expected_interval_seconds: intervalSeconds,
+    last_bar_time: last.time ?? null,
+    last_bar_age_seconds: lastBarAgeSeconds,
+    forming,
+    gaps,
+  };
+}
+
 export async function getOhlcv({ count, summary, _deps } = {}) {
   const { evaluate } = _resolve(_deps);
   const limit = Math.min(count || 100, MAX_OHLCV_BARS);
@@ -81,7 +110,9 @@ export async function getOhlcv({ count, summary, _deps } = {}) {
           var v = bars.valueAt(i);
           if (v) result.push({time: v[0], open: v[1], high: v[2], low: v[3], close: v[4], volume: v[5] || 0});
         }
-        return {bars: result, total_bars: bars.size(), source: 'direct_bars'};
+        var resolution = null;
+        try { resolution = ${CHART_API}.resolution(); } catch(e) {}
+        return {bars: result, total_bars: bars.size(), source: 'direct_bars', resolution: resolution};
       })()
     `);
   } catch { data = null; }
@@ -89,6 +120,8 @@ export async function getOhlcv({ count, summary, _deps } = {}) {
   if (!data || !data.bars || data.bars.length === 0) {
     throw appError(ErrorKind.NO_DATA, 'Could not extract OHLCV data. The chart may still be loading.');
   }
+
+  const integrity = computeOhlcvIntegrity(data.bars, data.resolution);
 
   if (summary) {
     const bars = data.bars;
@@ -107,10 +140,11 @@ export async function getOhlcv({ count, summary, _deps } = {}) {
       change_pct: first.open !== 0 ? Math.round(((last.close - first.open) / first.open) * 10000) / 100 + '%' : null,
       avg_volume: Math.round(volumes.reduce((a, b) => a + b, 0) / volumes.length),
       last_5_bars: bars.slice(-5),
+      integrity,
     };
   }
 
-  return { success: true, bar_count: data.bars.length, total_available: data.total_bars, source: data.source, bars: data.bars };
+  return { success: true, bar_count: data.bars.length, total_available: data.total_bars, source: data.source, integrity, bars: data.bars };
 }
 
 export async function getIndicator({ entity_id, _deps }) {
@@ -251,6 +285,102 @@ export async function getEquity({ _deps } = {}) {
     })()
   `);
   return { success: true, data_points: equity?.data?.length || 0, source: equity?.source, data: equity?.data || [], equity_summary: equity?.equity_summary, note: equity?.note, error: equity?.error };
+}
+
+const _round2 = (n) => Math.round(n * 100) / 100;
+
+/**
+ * Compute normalized strategy metrics from an equity curve and a trade list.
+ * The raw TradingView shapes are inconsistent, so this is best-effort: equity
+ * points may be numbers or objects ({equity|value|close}); trade profit is read
+ * from the first recognized numeric field. Pure and unit-tested.
+ *
+ * Sharpe is per-period (mean/std of equity returns), NOT annualized — annualizing
+ * needs the bar timeframe and a risk-free rate, which aren't reliably available.
+ */
+export function computeBacktestMetrics({ equity = [], trades = [] } = {}) {
+  const out = { equity_points: 0, trade_count: 0 };
+
+  const curve = (equity || [])
+    .map(p => (typeof p === 'number' ? p : (p && (p.equity ?? p.value ?? p.close))))
+    .filter(v => typeof v === 'number' && Number.isFinite(v));
+
+  if (curve.length >= 2) {
+    out.equity_points = curve.length;
+    const first = curve[0], last = curve[curve.length - 1];
+    out.total_return_pct = first !== 0 ? _round2(((last - first) / Math.abs(first)) * 100) : null;
+    let peak = curve[0], maxDD = 0, maxDDpct = 0;
+    for (const v of curve) {
+      if (v > peak) peak = v;
+      const dd = peak - v;
+      if (dd > maxDD) maxDD = dd;
+      const ddp = peak !== 0 ? dd / Math.abs(peak) : 0;
+      if (ddp > maxDDpct) maxDDpct = ddp;
+    }
+    out.max_drawdown = _round2(maxDD);
+    out.max_drawdown_pct = _round2(maxDDpct * 100);
+    const rets = [];
+    for (let i = 1; i < curve.length; i++) {
+      if (curve[i - 1] !== 0) rets.push((curve[i] - curve[i - 1]) / Math.abs(curve[i - 1]));
+    }
+    if (rets.length > 1) {
+      const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
+      const variance = rets.reduce((a, b) => a + (b - mean) ** 2, 0) / rets.length;
+      const std = Math.sqrt(variance);
+      out.volatility_pct = _round2(std * 100);
+      out.sharpe_per_period = std > 0 ? _round2(mean / std) : null;
+    }
+  }
+
+  const PROFIT_KEYS = ['profit', 'pnl', 'netProfit', 'net_profit', 'realizedPnl', 'pl', 'gain'];
+  const profitOf = (t) => {
+    for (const k of PROFIT_KEYS) { if (typeof t[k] === 'number' && Number.isFinite(t[k])) return t[k]; }
+    return null;
+  };
+  const withP = (trades || [])
+    .map(t => ({ t, p: (t && typeof t === 'object') ? profitOf(t) : null }))
+    .filter(x => x.p != null);
+
+  if (withP.length > 0) {
+    out.trade_count = withP.length;
+    const wins = withP.filter(x => x.p > 0), losses = withP.filter(x => x.p < 0);
+    const grossProfit = wins.reduce((a, x) => a + x.p, 0);
+    const grossLoss = Math.abs(losses.reduce((a, x) => a + x.p, 0));
+    out.wins = wins.length;
+    out.losses = losses.length;
+    out.win_rate_pct = _round2((wins.length / withP.length) * 100);
+    out.gross_profit = _round2(grossProfit);
+    out.gross_loss = _round2(grossLoss);
+    out.profit_factor = grossLoss > 0 ? _round2(grossProfit / grossLoss) : null;
+    out.avg_win = wins.length ? _round2(grossProfit / wins.length) : null;
+    out.avg_loss = losses.length ? _round2(grossLoss / losses.length) : null;
+    out.net_profit = _round2(withP.reduce((a, x) => a + x.p, 0));
+  } else if ((trades || []).length > 0) {
+    out.trade_count = trades.length;
+    out.note = 'Trades present but no recognizable numeric profit field; per-trade metrics unavailable.';
+  }
+
+  return out;
+}
+
+export async function getBacktestMetrics({ _deps } = {}) {
+  const eq = await getEquity({ _deps });
+  const tr = await getTrades({ max_trades: MAX_TRADES, _deps });
+  const metrics = computeBacktestMetrics({ equity: eq.data || [], trades: tr.trades || [] });
+  const notes = [eq.note, eq.error, tr.error].filter(Boolean);
+  if ((tr.trade_count || 0) >= MAX_TRADES) {
+    notes.push(`Trade metrics are based on the first ${MAX_TRADES} trades (tool cap); win-rate/profit-factor may not reflect the full backtest.`);
+  }
+  return {
+    success: true,
+    source: 'derived',
+    equity_source: eq.source,
+    equity_points: eq.data_points || 0,
+    trade_count: tr.trade_count || 0,
+    metrics,
+    equity_summary: eq.equity_summary,
+    notes: notes.length ? notes : undefined,
+  };
 }
 
 export async function getQuote({ symbol, _deps } = {}) {
