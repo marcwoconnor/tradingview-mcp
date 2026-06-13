@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeString, requireFinite } from '../src/connection.js';
-import { setSymbol, setTimeframe, setType, manageIndicator, setVisibleRange } from '../src/core/chart.js';
+import { setSymbol, setTimeframe, setType, manageIndicator, setVisibleRange, getVisibleRange, scrollToDate, symbolInfo, symbolSearch } from '../src/core/chart.js';
 import { drawShape } from '../src/core/drawing.js';
 
 // ── Mock helpers ─────────────────────────────────────────────────────────
@@ -27,6 +27,8 @@ function mockDeps(overrides = {}) {
       evaluateAsync: evaluate,
       waitForChartReady: async () => true,
       getChartApi: async () => 'window.__api',
+      sleep: async () => {}, // no real delay in tests
+      fetch: async () => ({ ok: true, json: async () => ({ symbols: [] }) }),
       ...overrides,
     },
     evaluate,
@@ -223,6 +225,58 @@ describe('chart.js — sanitized evaluate calls', () => {
     assert.ok(call, 'zoomToBarsRange called');
     assert.ok(call.includes('1700000000'), 'from value in call');
     assert.ok(call.includes('1700100000'), 'to value in call');
+  });
+});
+
+// ── chart.js — dependency injection coverage ─────────────────────────────
+
+describe('chart.js — DI coverage for read/scroll helpers', () => {
+  it('getVisibleRange routes through injected evaluate', async () => {
+    const evaluate = async () => ({ visible_range: { from: 1, to: 2 }, bars_range: {} });
+    const r = await getVisibleRange({ _deps: { evaluate } });
+    assert.equal(r.success, true);
+    assert.deepEqual(r.visible_range, { from: 1, to: 2 });
+  });
+
+  it('scrollToDate uses injected evaluate + sleep (no real delay)', async () => {
+    const calls = [];
+    const evaluate = async (expr) => { calls.push(expr); return 'D'; };
+    let slept = false;
+    const r = await scrollToDate({ date: '2024-01-15', _deps: { evaluate, sleep: async () => { slept = true; } } });
+    assert.equal(r.success, true);
+    assert.equal(r.centered_on, Math.floor(new Date('2024-01-15').getTime() / 1000));
+    assert.ok(calls.some(c => c.includes('zoomToBarsRange')), 'zoomToBarsRange evaluated');
+    assert.ok(slept, 'injected sleep was used instead of a real timer');
+  });
+
+  it('scrollToDate rejects an unparseable date', async () => {
+    await assert.rejects(
+      () => scrollToDate({ date: 'not-a-date', _deps: { evaluate: async () => 'D', sleep: async () => {} } }),
+      /Could not parse date/,
+    );
+  });
+
+  it('symbolInfo routes through injected evaluate', async () => {
+    const evaluate = async () => ({ symbol: 'AAPL', exchange: 'NASDAQ' });
+    const r = await symbolInfo({ _deps: { evaluate } });
+    assert.equal(r.success, true);
+    assert.equal(r.symbol, 'AAPL');
+  });
+
+  it('symbolSearch routes through injected fetch and strips <em> tags', async () => {
+    const fetch = async () => ({ ok: true, json: async () => ({ symbols: [{ symbol: '<em>AA</em>PL', description: 'Apple', exchange: 'NASDAQ', type: 'stock' }] }) });
+    const r = await symbolSearch({ query: 'AAPL', _deps: { fetch } });
+    assert.equal(r.success, true);
+    assert.equal(r.results[0].symbol, 'AAPL');
+    assert.equal(r.results[0].full_name, 'NASDAQ:AAPL');
+  });
+
+  it('symbolSearch throws on a non-ok response', async () => {
+    const fetch = async () => ({ ok: false, status: 503 });
+    await assert.rejects(
+      () => symbolSearch({ query: 'X', _deps: { fetch } }),
+      /503/,
+    );
   });
 });
 

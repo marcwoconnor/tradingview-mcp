@@ -28,6 +28,9 @@ const KNOWN_PATHS = {
 
 export { KNOWN_PATHS };
 
+/** Resolve after `ms` milliseconds. Centralizes the setTimeout-Promise idiom. */
+export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
  * Sanitize a string for safe interpolation into JavaScript code evaluated via CDP.
  * Uses JSON.stringify to produce a properly escaped JS string literal (with quotes).

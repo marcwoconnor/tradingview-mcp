@@ -1,7 +1,7 @@
 /**
  * Core chart control logic.
  */
-import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, safeString, requireFinite } from '../connection.js';
+import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, safeString, requireFinite, sleep as _sleep } from '../connection.js';
 import { waitForChartReady as _waitForChartReady } from '../wait.js';
 
 const CHART_API = 'window.TradingViewApi._activeChartWidgetWV.value()';
@@ -11,6 +11,8 @@ function _resolve(deps) {
     evaluate: deps?.evaluate || _evaluate,
     evaluateAsync: deps?.evaluateAsync || _evaluateAsync,
     waitForChartReady: deps?.waitForChartReady || _waitForChartReady,
+    sleep: deps?.sleep || _sleep,
+    fetch: deps?.fetch || globalThis.fetch,
   };
 }
 
@@ -85,7 +87,7 @@ export async function setType({ chart_type, _deps }) {
 }
 
 export async function manageIndicator({ action, indicator, entity_id, inputs: inputsRaw, _deps }) {
-  const { evaluate } = _resolve(_deps);
+  const { evaluate, sleep } = _resolve(_deps);
   const inputs = inputsRaw ? (typeof inputsRaw === 'string' ? JSON.parse(inputsRaw) : inputsRaw) : undefined;
 
   if (action === 'add') {
@@ -97,7 +99,7 @@ export async function manageIndicator({ action, indicator, entity_id, inputs: in
         chart.createStudy(${safeString(indicator)}, false, false, ${JSON.stringify(inputArr)});
       })()
     `);
-    await new Promise(r => setTimeout(r, 1500));
+    await sleep(1500);
     const after = await evaluate(`${CHART_API}.getAllStudies().map(function(s) { return s.id; })`);
     const newIds = (after || []).filter(id => !(before || []).includes(id));
     return { success: newIds.length > 0, action: 'add', indicator, entity_id: newIds[0] || null, new_study_count: newIds.length };
@@ -115,7 +117,8 @@ export async function manageIndicator({ action, indicator, entity_id, inputs: in
   }
 }
 
-export async function getVisibleRange() {
+export async function getVisibleRange({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const result = await evaluate(`
     (function() {
       var chart = ${CHART_API};
@@ -126,7 +129,7 @@ export async function getVisibleRange() {
 }
 
 export async function setVisibleRange({ from, to, _deps }) {
-  const { evaluate } = _resolve(_deps);
+  const { evaluate, sleep } = _resolve(_deps);
   const f = requireFinite(from, 'from');
   const t = requireFinite(to, 'to');
   await evaluate(`
@@ -146,7 +149,7 @@ export async function setVisibleRange({ from, to, _deps }) {
       ts.zoomToBarsRange(fromIdx, toIdx);
     })()
   `);
-  await new Promise(r => setTimeout(r, 500));
+  await sleep(500);
   const actual = await evaluate(`
     (function() {
       var chart = ${CHART_API};
@@ -157,7 +160,8 @@ export async function setVisibleRange({ from, to, _deps }) {
   return { success: true, requested: { from, to }, actual: actual || { from: 0, to: 0 } };
 }
 
-export async function scrollToDate({ date }) {
+export async function scrollToDate({ date, _deps }) {
+  const { evaluate, sleep } = _resolve(_deps);
   let timestamp;
   if (/^\d+$/.test(date)) timestamp = Number(date);
   else timestamp = Math.floor(new Date(date).getTime() / 1000);
@@ -192,11 +196,12 @@ export async function scrollToDate({ date }) {
       ts.zoomToBarsRange(fromIdx, toIdx);
     })()
   `);
-  await new Promise(r => setTimeout(r, 500));
+  await sleep(500);
   return { success: true, date, centered_on: timestamp, resolution, window: { from, to } };
 }
 
-export async function symbolInfo() {
+export async function symbolInfo({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const result = await evaluate(`
     (function() {
       var chart = ${CHART_API};
@@ -211,7 +216,8 @@ export async function symbolInfo() {
   return { success: true, ...result };
 }
 
-export async function symbolSearch({ query, type }) {
+export async function symbolSearch({ query, type, _deps }) {
+  const { fetch } = _resolve(_deps);
   // Use TradingView's public symbol search REST API (works without auth)
   const params = new URLSearchParams({
     text: query,
