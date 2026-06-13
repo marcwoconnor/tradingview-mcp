@@ -333,3 +333,22 @@ async function fetchAllPanes() {
 export async function streamAllPanes({ interval } = {}) {
   return pollLoop(fetchAllPanes, { interval: interval || 500, label: 'all-panes' });
 }
+
+// ── Reusable one-shot fetchers (shared with the MCP StreamManager) ──
+// Each returns the current snapshot for its channel via a single evaluate().
+// The CLI streams these in a loop; the MCP layer polls them and pushes
+// resource-update notifications.
+export const fetchers = {
+  quote: () => fetchQuote(),
+  bars: () => fetchLastBar(),
+  values: () => fetchValues(),
+  lines: (filter) => fetchLines(filter),
+  labels: (filter) => fetchLabels(filter),
+  tables: (filter) => fetchTables(filter),
+  panes: () => fetchAllPanes(),
+};
+
+/** Default poll interval (ms) per channel. */
+export const DEFAULT_INTERVALS = {
+  quote: 300, bars: 500, values: 500, lines: 1000, labels: 1000, tables: 2000, panes: 500,
+};

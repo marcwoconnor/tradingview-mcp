@@ -213,6 +213,15 @@ tv stream tables --filter Profiler       # table data monitoring
 tv stream all                            # all panes at once (multi-symbol)
 ```
 
+### Streaming over MCP
+
+The same channels are available to MCP clients without the CLI:
+
+- `stream_subscribe` — start a stream (`channel`: `quote`, `bars`, `values`, `lines`, `labels`, `tables`, `panes`). Returns a subscription `id` and a `stream://{id}` resource URI.
+- On each change the server pushes a `notifications/resources/updated` for that URI; clients that support resource notifications can re-read the resource for the latest snapshot.
+- `stream_poll` — read the latest value(s) directly, for clients that don't surface push notifications.
+- `stream_list` / `stream_unsubscribe` — manage active subscriptions (`stream_unsubscribe all` stops everything).
+
 ## How Claude Knows Which Tool to Use
 
 Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project. It contains a complete decision tree:
@@ -230,7 +239,7 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Draw a level at 24500" | `draw_shape` (horizontal_line) |
 | "Take a screenshot" | `capture_screenshot` |
 
-## Tool Reference (80 MCP tools)
+## Tool Reference (84 MCP tools)
 
 ### Chart Reading
 
@@ -366,7 +375,7 @@ npm test
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (80 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
+- **Transport**: MCP over stdio (84 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`
