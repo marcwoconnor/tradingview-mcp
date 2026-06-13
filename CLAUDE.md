@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-79 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+84 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -86,6 +86,11 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 
 ### "Tools are returning empty / wrong data"
 - `tv_diagnose` → check which internal API paths and DOM selectors are still present. If TradingView updated and broke something, this shows exactly what's missing (and which tools will be affected).
+
+### "Stream live updates"
+- `stream_subscribe` with `channel` (quote, bars, values, lines, labels, tables, panes) → starts a live poll; updates are pushed as `stream://{id}` resource notifications
+- `stream_poll` → read the latest streamed value(s) without relying on push (works in any client)
+- `stream_list` → see active subscriptions; `stream_unsubscribe` (id or "all") → stop them
 
 ## Context Management Rules
 

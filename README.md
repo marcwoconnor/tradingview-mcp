@@ -134,6 +134,21 @@ Replace `/path/to/tradingview-mcp` with your actual path.
 
 Ask Claude: *"Use tv_health_check to verify TradingView is connected"*
 
+If tools start returning empty or wrong data after a TradingView update, run **`tv_diagnose`** — it reports which internal API paths and DOM selectors are missing.
+
+## Configuration
+
+All optional, read from environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TV_CDP_HOST` | `localhost` | Chrome DevTools Protocol host |
+| `TV_CDP_PORT` | `9222` | Chrome DevTools Protocol port |
+| `TV_EVAL_TIMEOUT_MS` | `30000` | Per-`evaluate` timeout |
+| `TV_FETCH_TIMEOUT_MS` | `15000` | Per-HTTP-request timeout |
+| `TV_SCREENSHOT_DIR` | `<repo>/screenshots` | Where screenshots are written |
+| `TV_MCP_ALLOW_EVAL` | _(unset)_ | Set to enable the `ui_evaluate` arbitrary-eval tool (disabled by default) |
+
 ## CLI
 
 Every MCP tool is also accessible as a `tv` CLI command. All output is JSON for piping with `jq`.
@@ -198,6 +213,15 @@ tv stream tables --filter Profiler       # table data monitoring
 tv stream all                            # all panes at once (multi-symbol)
 ```
 
+### Streaming over MCP
+
+The same channels are available to MCP clients without the CLI:
+
+- `stream_subscribe` — start a stream (`channel`: `quote`, `bars`, `values`, `lines`, `labels`, `tables`, `panes`). Returns a subscription `id` and a `stream://{id}` resource URI.
+- On each change the server pushes a `notifications/resources/updated` for that URI; clients that support resource notifications can re-read the resource for the latest snapshot.
+- `stream_poll` — read the latest value(s) directly, for clients that don't surface push notifications.
+- `stream_list` / `stream_unsubscribe` — manage active subscriptions (`stream_unsubscribe all` stops everything).
+
 ## How Claude Knows Which Tool to Use
 
 Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project. It contains a complete decision tree:
@@ -215,7 +239,7 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Draw a level at 24500" | `draw_shape` (horizontal_line) |
 | "Take a screenshot" | `capture_screenshot` |
 
-## Tool Reference (78 MCP tools)
+## Tool Reference (84 MCP tools)
 
 ### Chart Reading
 
@@ -351,7 +375,7 @@ npm test
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (79 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
+- **Transport**: MCP over stdio (84 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`

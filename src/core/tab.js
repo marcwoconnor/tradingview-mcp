@@ -3,9 +3,10 @@
  * Controls TradingView Desktop tabs via CDP and Electron keyboard shortcuts.
  */
 import { getClient, fetchWithTimeout } from '../connection.js';
+import { config } from '../config.js';
 
-const CDP_HOST = 'localhost';
-const CDP_PORT = 9222;
+const CDP_HOST = config.cdpHost;
+const CDP_PORT = config.cdpPort;
 
 /**
  * List all open chart tabs (CDP page targets).

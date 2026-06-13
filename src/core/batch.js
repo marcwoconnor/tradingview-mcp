@@ -2,13 +2,14 @@
  * Core batch execution logic.
  */
 import { evaluate, evaluateAsync, getClient, getChartApi, getChartCollection, safeString } from '../connection.js';
+import { config } from '../config.js';
 import { waitForChartReady } from '../wait.js';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SCREENSHOT_DIR = join(dirname(dirname(__dirname)), 'screenshots');
+const SCREENSHOT_DIR = config.screenshotDir || join(dirname(dirname(__dirname)), 'screenshots');
 
 export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_count }) {
   const tfs = timeframes && timeframes.length > 0 ? timeframes : [null];

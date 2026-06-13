@@ -2,7 +2,7 @@
  * Core chart control logic.
  */
 import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, safeString, requireFinite, sleep as _sleep, fetchWithTimeout as _fetchWithTimeout, KNOWN_PATHS } from '../connection.js';
-import { waitForChartReady as _waitForChartReady, waitFor as _waitFor } from '../wait.js';
+import { waitForChartReady as _waitForChartReady, waitFor as _waitFor, resolutionToSeconds } from '../wait.js';
 
 const CHART_API = KNOWN_PATHS.chartApi;
 
@@ -181,12 +181,7 @@ export async function scrollToDate({ date, _deps }) {
   if (isNaN(timestamp)) throw new Error(`Could not parse date: ${date}. Use ISO format (2024-01-15) or unix timestamp.`);
 
   const resolution = await evaluate(`${CHART_API}.resolution()`);
-  let secsPerBar = 60;
-  const res = String(resolution);
-  if (res === 'D' || res === '1D') secsPerBar = 86400;
-  else if (res === 'W' || res === '1W') secsPerBar = 604800;
-  else if (res === 'M' || res === '1M') secsPerBar = 2592000;
-  else { const mins = parseInt(res, 10); if (!isNaN(mins)) secsPerBar = mins * 60; }
+  const secsPerBar = resolutionToSeconds(resolution);
 
   const halfWindow = 25 * secsPerBar;
   const from = timestamp - halfWindow;

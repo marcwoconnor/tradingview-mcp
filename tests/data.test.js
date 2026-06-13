@@ -6,8 +6,9 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   getOhlcv, getPineLines, getPineLabels, getPineTables, getPineBoxes,
-  getDepth, getQuote, classifyDepthRows,
+  getDepth, getQuote, classifyDepthRows, computeOhlcvIntegrity, computeBacktestMetrics,
 } from '../src/core/data.js';
+import { config } from '../src/config.js';
 import { isConnectionError } from '../src/connection.js';
 import { uiEvaluate } from '../src/core/ui.js';
 import { waitFor } from '../src/wait.js';
@@ -44,6 +45,87 @@ describe('getOhlcv(summary)', () => {
 
   it('throws when no bars are returned', async () => {
     await assert.rejects(() => getOhlcv({ summary: true, ...evalReturning({ bars: [], total_bars: 0 }) }), /Could not extract OHLCV/);
+  });
+});
+
+// ── OHLCV integrity flags ────────────────────────────────────────────────
+
+describe('computeOhlcvIntegrity', () => {
+  it('flags the last bar as forming when within its interval', () => {
+    const now = 1_700_000_000;
+    const bars = [{ time: now - 300 }, { time: now - 60 }]; // last bar 60s old, 5m interval
+    const r = computeOhlcvIntegrity(bars, '5', now);
+    assert.equal(r.expected_interval_seconds, 300);
+    assert.equal(r.last_bar_age_seconds, 60);
+    assert.equal(r.forming, true);
+    assert.equal(r.gaps, 0);
+  });
+
+  it('not forming once the interval has elapsed', () => {
+    const now = 1_700_000_000;
+    const bars = [{ time: now - 600 }, { time: now - 400 }]; // 400s old > 300s interval
+    const r = computeOhlcvIntegrity(bars, '5', now);
+    assert.equal(r.forming, false);
+  });
+
+  it('counts gaps larger than 1.5x the interval', () => {
+    const now = 1_700_000_000;
+    const bars = [{ time: 0 }, { time: 300 }, { time: 1200 }]; // 900s gap with 300s interval
+    const r = computeOhlcvIntegrity(bars, '5', now);
+    assert.equal(r.gaps, 1);
+  });
+
+  it('resolves daily interval', () => {
+    assert.equal(computeOhlcvIntegrity([{ time: 0 }, { time: 86400 }], 'D', 86400).expected_interval_seconds, 86400);
+  });
+});
+
+// ── Backtest metrics ─────────────────────────────────────────────────────
+
+describe('computeBacktestMetrics', () => {
+  it('computes drawdown, return, and Sharpe from an equity curve', () => {
+    const equity = [{ equity: 100 }, { equity: 110 }, { equity: 90 }, { equity: 120 }];
+    const m = computeBacktestMetrics({ equity, trades: [] });
+    assert.equal(m.equity_points, 4);
+    assert.equal(m.total_return_pct, 20);     // 100 → 120
+    assert.equal(m.max_drawdown, 20);         // peak 110 → trough 90
+    assert.ok(m.max_drawdown_pct > 18 && m.max_drawdown_pct < 19); // 20/110
+    assert.equal(typeof m.sharpe_per_period, 'number');
+  });
+
+  it('computes win rate and profit factor from trades', () => {
+    const trades = [{ profit: 10 }, { profit: -5 }, { profit: 20 }, { profit: -5 }];
+    const m = computeBacktestMetrics({ equity: [], trades });
+    assert.equal(m.trade_count, 4);
+    assert.equal(m.wins, 2);
+    assert.equal(m.losses, 2);
+    assert.equal(m.win_rate_pct, 50);
+    assert.equal(m.gross_profit, 30);
+    assert.equal(m.gross_loss, 10);
+    assert.equal(m.profit_factor, 3);
+    assert.equal(m.net_profit, 20);
+  });
+
+  it('notes when trades lack a recognizable profit field', () => {
+    const m = computeBacktestMetrics({ equity: [], trades: [{ id: 1 }, { id: 2 }] });
+    assert.equal(m.trade_count, 2);
+    assert.match(m.note, /no recognizable numeric profit/i);
+  });
+
+  it('accepts numeric equity points too', () => {
+    const m = computeBacktestMetrics({ equity: [100, 90, 95], trades: [] });
+    assert.equal(m.max_drawdown, 10);
+  });
+});
+
+// ── config ───────────────────────────────────────────────────────────────
+
+describe('config', () => {
+  it('exposes CDP + timeout defaults', () => {
+    assert.equal(config.cdpHost, 'localhost');
+    assert.equal(config.cdpPort, 9222);
+    assert.equal(config.evalTimeoutMs, 30000);
+    assert.equal(config.fetchTimeoutMs, 15000);
   });
 });
 
