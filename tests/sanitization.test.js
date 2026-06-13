@@ -8,7 +8,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeString, requireFinite } from '../src/connection.js';
 import { setSymbol, setTimeframe, setType, manageIndicator, setVisibleRange, getVisibleRange, scrollToDate, symbolInfo, symbolSearch } from '../src/core/chart.js';
-import { drawShape } from '../src/core/drawing.js';
+import { drawShape, listDrawings, getProperties, removeOne, clearAll } from '../src/core/drawing.js';
 
 // ── Mock helpers ─────────────────────────────────────────────────────────
 
@@ -336,6 +336,39 @@ describe('drawing.js — sanitized evaluate calls', () => {
     assert.ok(call, 'createMultipointShape called');
     assert.ok(call.includes('"trend_line"'), 'shape name via safeString');
   });
+
+  // Regression: listDrawings/getProperties/removeOne/clearAll previously
+  // referenced bare evaluate/getChartApi (not imported) and threw ReferenceError.
+  it('listDrawings routes through injected deps (no ReferenceError)', async () => {
+    const _deps = { evaluate: async () => [{ id: 's1', name: 'Line' }], getChartApi: async () => 'window.__api' };
+    const r = await listDrawings({ _deps });
+    assert.equal(r.success, true);
+    assert.equal(r.count, 1);
+  });
+
+  it('clearAll routes through injected deps (no ReferenceError)', async () => {
+    let cleared = false;
+    const _deps = { evaluate: async (expr) => { if (expr.includes('removeAllShapes')) cleared = true; }, getChartApi: async () => 'window.__api' };
+    const r = await clearAll({ _deps });
+    assert.equal(r.success, true);
+    assert.ok(cleared, 'removeAllShapes evaluated');
+  });
+
+  it('removeOne uses safeString for entity_id and routes through deps', async () => {
+    const calls = [];
+    const _deps = { evaluate: async (expr) => { calls.push(expr); return { removed: true, entity_id: 'abc', remaining_shapes: 0 }; }, getChartApi: async () => 'window.__api' };
+    const r = await removeOne({ entity_id: 'abc', _deps });
+    assert.equal(r.success, true);
+    assert.ok(calls.some(c => c.includes('"abc"')), 'entity_id passed via safeString');
+  });
+
+  it('getProperties uses safeString for entity_id and routes through deps', async () => {
+    const calls = [];
+    const _deps = { evaluate: async (expr) => { calls.push(expr); return { entity_id: 'xyz', visible: true }; }, getChartApi: async () => 'window.__api' };
+    const r = await getProperties({ entity_id: 'xyz', _deps });
+    assert.equal(r.success, true);
+    assert.ok(calls.some(c => c.includes('"xyz"')), 'entity_id passed via safeString');
+  });
 });
 
 // ── Source-level audit ───────────────────────────────────────────────────
@@ -372,11 +405,11 @@ describe('source audit — no unsafe interpolation patterns', () => {
 describe('path traversal prevention', () => {
   it('capture.js strips path separators from filename', () => {
     const source = readFileSync(new URL('../src/core/capture.js', import.meta.url), 'utf8');
-    assert.ok(source.includes(".replace(/[\\/\\\\]/g, '_')"));
+    assert.ok(source.includes(".replace(/[/\\\\]/g, '_')"));
   });
 
   it('batch.js strips path separators from filename', () => {
     const source = readFileSync(new URL('../src/core/batch.js', import.meta.url), 'utf8');
-    assert.ok(source.includes(".replace(/[\\/\\\\]/g, '_')"));
+    assert.ok(source.includes(".replace(/[/\\\\]/g, '_')"));
   });
 });
