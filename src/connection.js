@@ -106,14 +106,36 @@ export async function getTargetInfo() {
   return targetInfo;
 }
 
+const DEFAULT_EVAL_TIMEOUT = 30000;
+
 export async function evaluate(expression, opts = {}) {
   const c = await getClient();
-  const result = await c.Runtime.evaluate({
+  const { timeoutMs = DEFAULT_EVAL_TIMEOUT, ...cdpOpts } = opts;
+  const evalPromise = c.Runtime.evaluate({
     expression,
     returnByValue: true,
-    awaitPromise: opts.awaitPromise ?? false,
-    ...opts,
+    awaitPromise: cdpOpts.awaitPromise ?? false,
+    ...cdpOpts,
   });
+  // If the timeout wins the race, the eval promise may still settle later —
+  // attach a no-op handler so a late rejection isn't an unhandled rejection.
+  evalPromise.catch(() => {});
+
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`CDP evaluate timed out after ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+  });
+
+  let result;
+  try {
+    result = await Promise.race([evalPromise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+
   if (result.exceptionDetails) {
     const msg = result.exceptionDetails.exception?.description
       || result.exceptionDetails.text
