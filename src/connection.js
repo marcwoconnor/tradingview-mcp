@@ -73,6 +73,11 @@ export function safeString(str) {
  * Prevents corrupt values from reaching TradingView APIs that persist to cloud state.
  */
 export function requireFinite(value, name) {
+  // Reject null/'' explicitly: Number() coerces both to 0 (finite), which would
+  // silently turn a missing value into a real coordinate. Treat them like undefined.
+  if (value === null || value === '') {
+    throw new Error(`${name} must be a finite number, got: ${value}`);
+  }
   const n = Number(value);
   if (!Number.isFinite(n)) throw new Error(`${name} must be a finite number, got: ${value}`);
   return n;

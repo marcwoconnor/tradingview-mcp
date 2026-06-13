@@ -11,6 +11,10 @@
     ".": "./src/server.js",
     "./core": "./src/core/index.js"
   },
+  "files": [
+    "src",
+    "scripts"
+  ],
   "scripts": {
     "start": "node src/server.js",
     "tv": "node src/cli/index.js",

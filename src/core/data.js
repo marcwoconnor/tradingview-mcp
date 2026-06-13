@@ -98,7 +98,7 @@ export async function getOhlcv({ count, summary } = {}) {
       high: Math.max(...highs), low: Math.min(...lows),
       range: Math.round((Math.max(...highs) - Math.min(...lows)) * 100) / 100,
       change: Math.round((last.close - first.open) * 100) / 100,
-      change_pct: Math.round(((last.close - first.open) / first.open) * 10000) / 100 + '%',
+      change_pct: first.open !== 0 ? Math.round(((last.close - first.open) / first.open) * 10000) / 100 + '%' : null,
       avg_volume: Math.round(volumes.reduce((a, b) => a + b, 0) / volumes.length),
       last_5_bars: bars.slice(-5),
     };

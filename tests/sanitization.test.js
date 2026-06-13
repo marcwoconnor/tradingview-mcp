@@ -116,8 +116,12 @@ describe('requireFinite() — numeric validation', () => {
     assert.throws(() => requireFinite('abc', 'value'), /value must be a finite number/);
   });
 
-  it('coerces null to 0', () => {
-    assert.equal(requireFinite(null, 'x'), 0);
+  it('rejects null (does not silently coerce to 0)', () => {
+    assert.throws(() => requireFinite(null, 'x'), /x must be a finite number/);
+  });
+
+  it('rejects empty string (does not silently coerce to 0)', () => {
+    assert.throws(() => requireFinite('', 'x'), /x must be a finite number/);
   });
 
   it('rejects undefined', () => {
