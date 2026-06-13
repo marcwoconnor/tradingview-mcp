@@ -1,9 +1,9 @@
 /**
  * Core indicator settings logic.
  */
-import { evaluate, safeString } from '../connection.js';
+import { evaluate, safeString, KNOWN_PATHS } from '../connection.js';
 
-const CHART_API = 'window.TradingViewApi._activeChartWidgetWV.value()';
+const CHART_API = KNOWN_PATHS.chartApi;
 
 export async function setInputs({ entity_id, inputs: inputsRaw }) {
   const inputs = inputsRaw ? (typeof inputsRaw === 'string' ? JSON.parse(inputsRaw) : inputsRaw) : undefined;

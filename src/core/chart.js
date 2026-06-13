@@ -1,10 +1,35 @@
 /**
  * Core chart control logic.
  */
-import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, safeString, requireFinite, sleep as _sleep } from '../connection.js';
+import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, safeString, requireFinite, sleep as _sleep, KNOWN_PATHS } from '../connection.js';
 import { waitForChartReady as _waitForChartReady } from '../wait.js';
 
-const CHART_API = 'window.TradingViewApi._activeChartWidgetWV.value()';
+const CHART_API = KNOWN_PATHS.chartApi;
+
+/**
+ * Build the injected JS that zooms the chart to cover the bar range whose
+ * timestamps fall within [from, to] (unix seconds). Shared by setVisibleRange
+ * and scrollToDate. `from`/`to` must be finite numbers (caller-validated).
+ */
+function buildZoomToRangeJS(from, to) {
+  return `
+    (function() {
+      var chart = ${CHART_API};
+      var m = chart._chartWidget.model();
+      var ts = m.timeScale();
+      var bars = m.mainSeries().bars();
+      var startIdx = bars.firstIndex();
+      var endIdx = bars.lastIndex();
+      var fromIdx = startIdx, toIdx = endIdx;
+      for (var i = startIdx; i <= endIdx; i++) {
+        var v = bars.valueAt(i);
+        if (v && v[0] >= ${from} && fromIdx === startIdx) fromIdx = i;
+        if (v && v[0] <= ${to}) toIdx = i;
+      }
+      ts.zoomToBarsRange(fromIdx, toIdx);
+    })()
+  `;
+}
 
 function _resolve(deps) {
   return {
@@ -132,23 +157,7 @@ export async function setVisibleRange({ from, to, _deps }) {
   const { evaluate, sleep } = _resolve(_deps);
   const f = requireFinite(from, 'from');
   const t = requireFinite(to, 'to');
-  await evaluate(`
-    (function() {
-      var chart = ${CHART_API};
-      var m = chart._chartWidget.model();
-      var ts = m.timeScale();
-      var bars = m.mainSeries().bars();
-      var startIdx = bars.firstIndex();
-      var endIdx = bars.lastIndex();
-      var fromIdx = startIdx, toIdx = endIdx;
-      for (var i = startIdx; i <= endIdx; i++) {
-        var v = bars.valueAt(i);
-        if (v && v[0] >= ${f} && fromIdx === startIdx) fromIdx = i;
-        if (v && v[0] <= ${t}) toIdx = i;
-      }
-      ts.zoomToBarsRange(fromIdx, toIdx);
-    })()
-  `);
+  await evaluate(buildZoomToRangeJS(f, t));
   await sleep(500);
   const actual = await evaluate(`
     (function() {
@@ -179,23 +188,7 @@ export async function scrollToDate({ date, _deps }) {
   const from = timestamp - halfWindow;
   const to = timestamp + halfWindow;
 
-  await evaluate(`
-    (function() {
-      var chart = ${CHART_API};
-      var m = chart._chartWidget.model();
-      var ts = m.timeScale();
-      var bars = m.mainSeries().bars();
-      var startIdx = bars.firstIndex();
-      var endIdx = bars.lastIndex();
-      var fromIdx = startIdx, toIdx = endIdx;
-      for (var i = startIdx; i <= endIdx; i++) {
-        var v = bars.valueAt(i);
-        if (v && v[0] >= ${from} && fromIdx === startIdx) fromIdx = i;
-        if (v && v[0] <= ${to}) toIdx = i;
-      }
-      ts.zoomToBarsRange(fromIdx, toIdx);
-    })()
-  `);
+  await evaluate(buildZoomToRangeJS(from, to));
   await sleep(500);
   return { success: true, date, centered_on: timestamp, resolution, window: { from, to } };
 }

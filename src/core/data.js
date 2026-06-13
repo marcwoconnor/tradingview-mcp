@@ -6,12 +6,13 @@ import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
 const CHART_API = KNOWN_PATHS.chartApi;
+const CHART_WIDGET = KNOWN_PATHS.chartWidget;
 const BARS_PATH = KNOWN_PATHS.mainSeriesBars;
 
 function buildGraphicsJS(collectionName, mapKey, filter) {
   return `
     (function() {
-      var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
+      var chart = ${CHART_WIDGET};
       var model = chart.model();
       var sources = model.model().dataSources();
       var results = [];
@@ -324,7 +325,7 @@ export async function getDepth() {
 export async function getStudyValues() {
   const data = await evaluate(`
     (function() {
-      var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
+      var chart = ${CHART_WIDGET};
       var model = chart.model();
       var sources = model.model().dataSources();
       var results = [];
