@@ -52,7 +52,7 @@ export function registerUiTools(server) {
     strategy: z.enum(['text', 'aria-label', 'css']).optional().describe('Search strategy (default: text)'),
   }, wrap(core.findElement));
 
-  server.tool('ui_evaluate', 'Escape hatch: run arbitrary JavaScript in the TradingView page context. The expression is evaluated UNSANITIZED — only pass code you trust. Prefer a dedicated tool when one exists.', {
+  server.tool('ui_evaluate', 'Escape hatch: run arbitrary JavaScript in the TradingView page context. The expression is evaluated UNSANITIZED — only pass code you trust. DISABLED by default; set env TV_MCP_ALLOW_EVAL=1 to enable. Prefer a dedicated tool when one exists.', {
     expression: z.string().describe('JavaScript expression to evaluate in the page context (runs verbatim, no escaping). Wrap in IIFE for complex logic.'),
   }, wrap(core.uiEvaluate));
 }
