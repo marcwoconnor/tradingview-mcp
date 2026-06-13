@@ -1,4 +1,5 @@
 import CDP from 'chrome-remote-interface';
+import { ErrorKind, appError } from './errors.js';
 
 let client = null;
 let targetInfo = null;
@@ -87,10 +88,10 @@ export function requireFinite(value, name) {
   // Reject null/'' explicitly: Number() coerces both to 0 (finite), which would
   // silently turn a missing value into a real coordinate. Treat them like undefined.
   if (value === null || value === '') {
-    throw new Error(`${name} must be a finite number, got: ${value}`);
+    throw appError(ErrorKind.BAD_INPUT, `${name} must be a finite number, got: ${value}`);
   }
   const n = Number(value);
-  if (!Number.isFinite(n)) throw new Error(`${name} must be a finite number, got: ${value}`);
+  if (!Number.isFinite(n)) throw appError(ErrorKind.BAD_INPUT, `${name} must be a finite number, got: ${value}`);
   return n;
 }
 
@@ -123,7 +124,7 @@ async function _doConnect() {
     try {
       const target = await findChartTarget();
       if (!target) {
-        throw new Error('No TradingView chart target found. Is TradingView open with a chart?');
+        throw appError(ErrorKind.CONNECTION, 'No TradingView chart target found. Is TradingView open with a chart?', { hint: 'Use tv_launch to start TradingView with CDP enabled.' });
       }
       targetInfo = target;
       client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
@@ -140,7 +141,7 @@ async function _doConnect() {
       await new Promise(r => setTimeout(r, delay));
     }
   }
-  throw new Error(`CDP connection failed after ${MAX_RETRIES} attempts: ${lastError?.message}`);
+  throw appError(ErrorKind.CONNECTION, `CDP connection failed after ${MAX_RETRIES} attempts: ${lastError?.message}`, { cause: lastError, hint: 'Is TradingView running with --remote-debugging-port=9222? Try tv_launch.' });
 }
 
 async function findChartTarget() {
@@ -192,7 +193,7 @@ async function _evaluateOnce(expression, opts = {}) {
   let timer;
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(
-      () => reject(new Error(`CDP evaluate timed out after ${timeoutMs}ms`)),
+      () => reject(appError(ErrorKind.TIMEOUT, `CDP evaluate timed out after ${timeoutMs}ms`)),
       timeoutMs,
     );
   });
@@ -208,7 +209,7 @@ async function _evaluateOnce(expression, opts = {}) {
     const msg = result.exceptionDetails.exception?.description
       || result.exceptionDetails.text
       || 'Unknown evaluation error';
-    throw new Error(`JS evaluation error: ${msg}`);
+    throw appError(ErrorKind.EVAL, `JS evaluation error: ${msg}`);
   }
   return result.result?.value;
 }
@@ -232,7 +233,7 @@ export async function disconnect() {
 async function verifyAndReturn(path, name) {
   const exists = await evaluate(`typeof (${path}) !== 'undefined' && (${path}) !== null`);
   if (!exists) {
-    throw new Error(`${name} not available at ${path}`);
+    throw appError(ErrorKind.API_MISSING, `${name} not available at ${path}`, { hint: 'TradingView may have changed its internals. Run tv_diagnose to see which paths are missing.' });
   }
   return path;
 }

@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-78 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+79 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -83,6 +83,9 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 ### "TradingView isn't running"
 - `tv_launch` → auto-detect and launch TradingView with CDP on Mac/Win/Linux
 - `tv_health_check` → verify connection is working
+
+### "Tools are returning empty / wrong data"
+- `tv_diagnose` → check which internal API paths and DOM selectors are still present. If TradingView updated and broke something, this shows exactly what's missing (and which tools will be affected).
 
 ## Context Management Rules
 

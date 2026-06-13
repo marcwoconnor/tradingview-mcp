@@ -2,6 +2,7 @@
  * Core data access logic.
  */
 import { evaluate as _evaluate, KNOWN_PATHS, safeString } from '../connection.js';
+import { ErrorKind, appError } from '../errors.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
@@ -86,7 +87,7 @@ export async function getOhlcv({ count, summary, _deps } = {}) {
   } catch { data = null; }
 
   if (!data || !data.bars || data.bars.length === 0) {
-    throw new Error('Could not extract OHLCV data. The chart may still be loading.');
+    throw appError(ErrorKind.NO_DATA, 'Could not extract OHLCV data. The chart may still be loading.');
   }
 
   if (summary) {
@@ -126,7 +127,7 @@ export async function getIndicator({ entity_id, _deps }) {
     })()
   `);
 
-  if (data?.error) throw new Error(data.error);
+  if (data?.error) throw appError(ErrorKind.NOT_FOUND, data.error);
 
   let inputs = data?.inputs;
   if (Array.isArray(inputs)) {
@@ -286,7 +287,7 @@ export async function getQuote({ symbol, _deps } = {}) {
       return quote;
     })()
   `);
-  if (!data || (!data.last && !data.close)) throw new Error('Could not retrieve quote. The chart may still be loading.');
+  if (!data || (!data.last && !data.close)) throw appError(ErrorKind.NO_DATA, 'Could not retrieve quote. The chart may still be loading.');
   // A crossed market (ask < bid) from DOM scraping almost always means we read
   // the wrong elements — drop both rather than report an inverted spread.
   if (data.bid != null && data.ask != null) {
@@ -362,7 +363,7 @@ export async function getDepth({ _deps } = {}) {
     })()
   `);
 
-  if (!data || !data.found) throw new Error(data?.error || 'DOM panel not found.');
+  if (!data || !data.found) throw appError(ErrorKind.NOT_FOUND, data?.error || 'DOM panel not found.', { hint: 'Open the DOM / Depth of Market panel in TradingView first.' });
 
   if ((!data.rows || data.rows.length === 0) && data.raw_values && data.raw_values.length > 0) {
     return { success: true, bid_levels: 0, ask_levels: 0, spread: null, bids: [], asks: [], raw_values: data.raw_values, note: 'Could not parse individual bid/ask rows; returning raw numeric values from the panel.' };

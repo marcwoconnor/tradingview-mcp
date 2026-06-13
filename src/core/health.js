@@ -88,6 +88,67 @@ export async function discover() {
   return { success: true, apis_available: available, apis_total: total, apis: paths };
 }
 
+/**
+ * Drift detector: probe the internal API paths the tools depend on and the
+ * critical DOM selectors the scraping tools rely on, then report which are
+ * present. When TradingView ships a UI/internal change, the affected tools
+ * silently return empty — this turns that into an explicit, actionable signal.
+ * Complements tv_discover (which lists API *methods*).
+ */
+export async function diagnose({ _deps } = {}) {
+  const evalFn = _deps?.evaluate || evaluate;
+  const report = await evalFn(`
+    (function() {
+      function ok(fn) { try { return !!fn(); } catch(e) { return false; } }
+      function present(q) { try { return !!document.querySelector(q); } catch(e) { return false; } }
+      var api = {
+        chartApi: ok(function(){ return window.TradingViewApi._activeChartWidgetWV.value(); }),
+        chartWidget: ok(function(){ return window.TradingViewApi._activeChartWidgetWV.value()._chartWidget; }),
+        mainSeriesBars: ok(function(){ return typeof window.TradingViewApi._activeChartWidgetWV.value()._chartWidget.model().mainSeries().bars().lastIndex === 'function'; }),
+        dataSources: ok(function(){ return window.TradingViewApi._activeChartWidgetWV.value()._chartWidget.model().model().dataSources().length >= 0; }),
+        chartWidgetCollection: ok(function(){ return window.TradingViewApi._chartWidgetCollection; }),
+        replayApi: ok(function(){ return window.TradingViewApi._replayApi; }),
+        alertService: ok(function(){ return window.TradingViewApi._alertService; }),
+        bottomWidgetBar: ok(function(){ return window.TradingView.bottomWidgetBar; })
+      };
+      // Selectors that should always exist on a loaded chart
+      var selectors_core = {
+        symbol_legend: present('[data-name="legend-source-title"]'),
+        chart_canvas: present('canvas'),
+        chart_container: present('[class*="chart-container"]')
+      };
+      // Panel-dependent selectors — only present when that panel is open (informational)
+      var selectors_optional = {
+        dom_panel: present('[class*="dom-"]') || present('[data-name="dom"]'),
+        pine_editor: present('.monaco-editor.pine-editor-monaco'),
+        strategy_tester: present('[data-name="backtesting"]'),
+        watchlist: present('[class*="watchlist"]')
+      };
+      return { api: api, selectors_core: selectors_core, selectors_optional: selectors_optional };
+    })()
+  `);
+
+  const api = report?.api || {};
+  const core = report?.selectors_core || {};
+  const missingApis = Object.keys(api).filter(k => !api[k]);
+  const missingCore = Object.keys(core).filter(k => !core[k]);
+  const healthy = missingApis.length === 0 && missingCore.length === 0;
+
+  const result = {
+    success: true,
+    healthy,
+    api,
+    selectors_core: core,
+    selectors_optional: report?.selectors_optional || {},
+    missing_apis: missingApis,
+    missing_core_selectors: missingCore,
+  };
+  if (!healthy) {
+    result.hint = `${missingApis.length} API path(s) and ${missingCore.length} core selector(s) are missing — TradingView may have updated. Tools that depend on them will return empty/incorrect data until the paths/selectors are updated.`;
+  }
+  return result;
+}
+
 export async function uiState() {
   const state = await evaluate(`
     (function() {

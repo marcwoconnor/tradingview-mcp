@@ -27,6 +27,7 @@ function mockDeps(overrides = {}) {
       evaluate,
       evaluateAsync: evaluate,
       waitForChartReady: async () => true,
+      waitFor: async () => true,
       getChartApi: async () => 'window.__api',
       sleep: async () => {}, // no real delay in tests
       fetch: async () => ({ ok: true, json: async () => ({ symbols: [] }) }),

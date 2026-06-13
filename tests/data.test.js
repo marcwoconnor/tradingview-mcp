@@ -10,6 +10,10 @@ import {
 } from '../src/core/data.js';
 import { isConnectionError } from '../src/connection.js';
 import { uiEvaluate } from '../src/core/ui.js';
+import { waitFor } from '../src/wait.js';
+import { diagnose } from '../src/core/health.js';
+import { wrap } from '../src/tools/_format.js';
+import { appError, ErrorKind } from '../src/errors.js';
 
 // evaluate mock that always returns the same canned payload
 const evalReturning = (payload) => ({ _deps: { evaluate: async () => payload } });
@@ -216,5 +220,79 @@ describe('ui_evaluate gate', () => {
       if (prev === undefined) delete process.env.TV_MCP_ALLOW_EVAL;
       else process.env.TV_MCP_ALLOW_EVAL = prev;
     }
+  });
+});
+
+// ── waitFor primitive ────────────────────────────────────────────────────
+
+describe('waitFor', () => {
+  it('returns true as soon as the predicate is truthy', async () => {
+    let calls = 0;
+    const evaluate = async () => { calls++; return calls >= 3; }; // truthy on 3rd poll
+    const ok = await waitFor('cond', { timeout: 1000, interval: 1, deps: { evaluate, sleep: async () => {} } });
+    assert.equal(ok, true);
+    assert.equal(calls, 3);
+  });
+
+  it('returns false on timeout', async () => {
+    const ok = await waitFor('cond', { timeout: 5, interval: 1, deps: { evaluate: async () => false, sleep: async () => {} } });
+    assert.equal(ok, false);
+  });
+
+  it('treats an evaluate throw as not-ready (does not reject)', async () => {
+    let n = 0;
+    const evaluate = async () => { n++; if (n < 2) throw new Error('transient'); return true; };
+    const ok = await waitFor('cond', { timeout: 1000, interval: 1, deps: { evaluate, sleep: async () => {} } });
+    assert.equal(ok, true);
+  });
+});
+
+// ── tv_diagnose drift detector ───────────────────────────────────────────
+
+describe('diagnose', () => {
+  it('reports healthy when everything is present', async () => {
+    const report = {
+      api: { chartApi: true, chartWidget: true, mainSeriesBars: true, dataSources: true, chartWidgetCollection: true, replayApi: true, alertService: true, bottomWidgetBar: true },
+      selectors_core: { symbol_legend: true, chart_canvas: true, chart_container: true },
+      selectors_optional: { dom_panel: false },
+    };
+    const r = await diagnose({ _deps: { evaluate: async () => report } });
+    assert.equal(r.healthy, true);
+    assert.deepEqual(r.missing_apis, []);
+    assert.equal(r.hint, undefined);
+  });
+
+  it('flags missing paths/selectors with a hint', async () => {
+    const report = {
+      api: { chartApi: false, chartWidget: true, mainSeriesBars: true },
+      selectors_core: { symbol_legend: false, chart_canvas: true },
+      selectors_optional: {},
+    };
+    const r = await diagnose({ _deps: { evaluate: async () => report } });
+    assert.equal(r.healthy, false);
+    assert.deepEqual(r.missing_apis, ['chartApi']);
+    assert.deepEqual(r.missing_core_selectors, ['symbol_legend']);
+    assert.match(r.hint, /TradingView may have updated/);
+  });
+});
+
+// ── error taxonomy surfaced through wrap() ───────────────────────────────
+
+describe('wrap() surfaces AppError kind + hint', () => {
+  it('includes error_kind and hint from a thrown AppError', async () => {
+    const handler = wrap(async () => { throw appError(ErrorKind.NOT_FOUND, 'nope', { hint: 'open it' }); });
+    const res = await handler({});
+    const parsed = JSON.parse(res.content[0].text);
+    assert.equal(parsed.success, false);
+    assert.equal(parsed.error_kind, 'not_found');
+    assert.equal(parsed.hint, 'open it');
+    assert.equal(res.isError, true);
+  });
+
+  it('plain errors have no error_kind', async () => {
+    const handler = wrap(async () => { throw new Error('boom'); });
+    const parsed = JSON.parse((await handler({})).content[0].text);
+    assert.equal(parsed.error, 'boom');
+    assert.equal(parsed.error_kind, undefined);
   });
 });

@@ -9,6 +9,8 @@ export function registerHealthTools(server) {
 
   server.tool('tv_ui_state', 'Get current UI state: which panels are open, what buttons are visible/enabled/disabled', {}, wrap(core.uiState));
 
+  server.tool('tv_diagnose', 'Drift detector: check which internal API paths and critical DOM selectors are present. Run this when tools start returning empty/wrong data — it shows whether a TradingView update broke something.', {}, wrap(core.diagnose));
+
   server.tool('tv_launch', 'Launch TradingView Desktop with Chrome DevTools Protocol (remote debugging) enabled. Auto-detects install location on Mac, Windows, and Linux.', {
     port: z.coerce.number().optional().describe('CDP port (default 9222)'),
     kill_existing: z.coerce.boolean().optional().describe('Kill existing TradingView instances first (default true)'),
