@@ -1,13 +1,17 @@
 /**
  * Core data access logic.
  */
-import { evaluate, KNOWN_PATHS, safeString } from '../connection.js';
+import { evaluate as _evaluate, KNOWN_PATHS, safeString } from '../connection.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
 const CHART_API = KNOWN_PATHS.chartApi;
 const CHART_WIDGET = KNOWN_PATHS.chartWidget;
 const BARS_PATH = KNOWN_PATHS.mainSeriesBars;
+
+function _resolve(deps) {
+  return { evaluate: deps?.evaluate || _evaluate };
+}
 
 function buildGraphicsJS(collectionName, mapKey, filter) {
   return `
@@ -60,7 +64,8 @@ function buildGraphicsJS(collectionName, mapKey, filter) {
   `;
 }
 
-export async function getOhlcv({ count, summary } = {}) {
+export async function getOhlcv({ count, summary, _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const limit = Math.min(count || 100, MAX_OHLCV_BARS);
   let data;
   try {
@@ -107,7 +112,8 @@ export async function getOhlcv({ count, summary } = {}) {
   return { success: true, bar_count: data.bars.length, total_available: data.total_bars, source: data.source, bars: data.bars };
 }
 
-export async function getIndicator({ entity_id }) {
+export async function getIndicator({ entity_id, _deps }) {
+  const { evaluate } = _resolve(_deps);
   const data = await evaluate(`
     (function() {
       var api = ${CHART_API};
@@ -133,7 +139,8 @@ export async function getIndicator({ entity_id }) {
   return { success: true, entity_id, visible: data?.visible, inputs };
 }
 
-export async function getStrategyResults() {
+export async function getStrategyResults({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const results = await evaluate(`
     (function() {
       try {
@@ -165,7 +172,8 @@ export async function getStrategyResults() {
   return { success: true, metric_count: Object.keys(results?.metrics || {}).length, source: results?.source, metrics: results?.metrics || {}, error: results?.error };
 }
 
-export async function getTrades({ max_trades } = {}) {
+export async function getTrades({ max_trades, _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const limit = Math.min(max_trades || 20, MAX_TRADES);
   const trades = await evaluate(`
     (function() {
@@ -202,7 +210,8 @@ export async function getTrades({ max_trades } = {}) {
   return { success: true, trade_count: trades?.trades?.length || 0, source: trades?.source, trades: trades?.trades || [], error: trades?.error };
 }
 
-export async function getEquity() {
+export async function getEquity({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const equity = await evaluate(`
     (function() {
       try {
@@ -243,7 +252,8 @@ export async function getEquity() {
   return { success: true, data_points: equity?.data?.length || 0, source: equity?.source, data: equity?.data || [], equity_summary: equity?.equity_summary, note: equity?.note, error: equity?.error };
 }
 
-export async function getQuote({ symbol } = {}) {
+export async function getQuote({ symbol, _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const data = await evaluate(`
     (function() {
       var api = ${CHART_API};
@@ -261,8 +271,10 @@ export async function getQuote({ symbol } = {}) {
       try {
         var bidEl = document.querySelector('[class*="bid"] [class*="price"], [class*="dom-"] [class*="bid"]');
         var askEl = document.querySelector('[class*="ask"] [class*="price"], [class*="dom-"] [class*="ask"]');
-        if (bidEl) quote.bid = parseFloat(bidEl.textContent.replace(/[^0-9.\\-]/g, ''));
-        if (askEl) quote.ask = parseFloat(askEl.textContent.replace(/[^0-9.\\-]/g, ''));
+        // Only accept finite, positive values — a matched-but-unrelated element
+        // can yield NaN/garbage that would otherwise be reported as a real quote.
+        if (bidEl) { var b = parseFloat(bidEl.textContent.replace(/[^0-9.\\-]/g, '')); if (isFinite(b) && b > 0) quote.bid = b; }
+        if (askEl) { var a = parseFloat(askEl.textContent.replace(/[^0-9.\\-]/g, '')); if (isFinite(a) && a > 0) quote.ask = a; }
       } catch(e) {}
       try {
         var hdr = document.querySelector('[class*="headerRow"] [class*="last-"]');
@@ -275,10 +287,46 @@ export async function getQuote({ symbol } = {}) {
     })()
   `);
   if (!data || (!data.last && !data.close)) throw new Error('Could not retrieve quote. The chart may still be loading.');
+  // A crossed market (ask < bid) from DOM scraping almost always means we read
+  // the wrong elements — drop both rather than report an inverted spread.
+  if (data.bid != null && data.ask != null) {
+    if (data.ask < data.bid) {
+      delete data.bid;
+      delete data.ask;
+      data.bid_ask_note = 'Scraped bid/ask were inconsistent (ask < bid) and have been dropped as unreliable.';
+    } else {
+      data.bid_ask_note = 'bid/ask are scraped from the DOM (best-effort), not from the price feed.';
+    }
+  }
   return { success: true, ...data };
 }
 
-export async function getDepth() {
+/**
+ * Split DOM rows into bid/ask sides and compute the spread. A row is only
+ * placed on a side when the page gave an explicit hint (side: 'bid'|'ask');
+ * rows with side 'unknown' go to `unclassified` rather than being guessed by
+ * position — a guessed side could silently invert the order book. Pure and
+ * unit-tested.
+ */
+export function classifyDepthRows(rows) {
+  const bids = [], asks = [], unclassified = [];
+  for (const r of (rows || [])) {
+    const level = { price: r.price, size: r.size };
+    if (r.side === 'bid') bids.push(level);
+    else if (r.side === 'ask') asks.push(level);
+    else unclassified.push(level);
+  }
+  bids.sort((a, b) => b.price - a.price);
+  asks.sort((a, b) => a.price - b.price);
+  let spread = null;
+  if (asks.length > 0 && bids.length > 0) spread = +(asks[0].price - bids[0].price).toFixed(6);
+  return { bids, asks, unclassified, spread };
+}
+
+export async function getDepth({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
+  // The page returns raw rows tagged with whatever side it could detect from
+  // class/HTML; classification + sorting happens in Node (classifyDepthRows).
   const data = await evaluate(`
     (function() {
       var domPanel = document.querySelector('[class*="depth"]')
@@ -287,10 +335,10 @@ export async function getDepth() {
         || document.querySelector('[class*="DOM"]')
         || document.querySelector('[data-name="dom"]');
       if (!domPanel) return { found: false, error: 'DOM / Depth of Market panel not found.' };
-      var bids = [], asks = [];
-      var rows = domPanel.querySelectorAll('[class*="row"], tr');
-      for (var i = 0; i < rows.length; i++) {
-        var row = rows[i];
+      var rows = [];
+      var rowEls = domPanel.querySelectorAll('[class*="row"], tr');
+      for (var i = 0; i < rowEls.length; i++) {
+        var row = rowEls[i];
         var priceEl = row.querySelector('[class*="price"]');
         var sizeEl = row.querySelector('[class*="size"], [class*="volume"], [class*="qty"]');
         if (!priceEl) continue;
@@ -299,30 +347,38 @@ export async function getDepth() {
         if (isNaN(price)) continue;
         var rowClass = row.className || '';
         var rowHTML = row.innerHTML || '';
-        if (/bid|buy/i.test(rowClass) || /bid|buy/i.test(rowHTML)) bids.push({ price, size });
-        else if (/ask|sell/i.test(rowClass) || /ask|sell/i.test(rowHTML)) asks.push({ price, size });
-        else if (i < rows.length / 2) asks.push({ price, size });
-        else bids.push({ price, size });
+        var side = 'unknown';
+        if (/bid|buy/i.test(rowClass) || /bid|buy/i.test(rowHTML)) side = 'bid';
+        else if (/ask|sell/i.test(rowClass) || /ask|sell/i.test(rowHTML)) side = 'ask';
+        rows.push({ price: price, size: size, side: side });
       }
-      if (bids.length === 0 && asks.length === 0) {
+      if (rows.length === 0) {
         var cells = domPanel.querySelectorAll('[class*="cell"], td');
         var prices = [];
         cells.forEach(function(c) { var val = parseFloat(c.textContent.replace(/[^0-9.\\-]/g, '')); if (!isNaN(val) && val > 0) prices.push(val); });
-        if (prices.length > 0) return { found: true, raw_values: prices.slice(0, 50), bids: [], asks: [], note: 'Could not classify bid/ask levels.' };
+        return { found: true, rows: [], raw_values: prices.slice(0, 50) };
       }
-      bids.sort(function(a, b) { return b.price - a.price; });
-      asks.sort(function(a, b) { return a.price - b.price; });
-      var spread = null;
-      if (asks.length > 0 && bids.length > 0) spread = +(asks[0].price - bids[0].price).toFixed(6);
-      return { found: true, bids: bids, asks: asks, spread: spread };
+      return { found: true, rows: rows };
     })()
   `);
 
   if (!data || !data.found) throw new Error(data?.error || 'DOM panel not found.');
-  return { success: true, bid_levels: data.bids?.length || 0, ask_levels: data.asks?.length || 0, spread: data.spread, bids: data.bids || [], asks: data.asks || [], raw_values: data.raw_values, note: data.note };
+
+  if ((!data.rows || data.rows.length === 0) && data.raw_values && data.raw_values.length > 0) {
+    return { success: true, bid_levels: 0, ask_levels: 0, spread: null, bids: [], asks: [], raw_values: data.raw_values, note: 'Could not parse individual bid/ask rows; returning raw numeric values from the panel.' };
+  }
+
+  const { bids, asks, unclassified, spread } = classifyDepthRows(data.rows);
+  const result = { success: true, bid_levels: bids.length, ask_levels: asks.length, spread, bids, asks };
+  if (unclassified.length > 0) {
+    result.unclassified = unclassified;
+    result.note = `${unclassified.length} level(s) had no bid/ask hint in the DOM and are listed under "unclassified" rather than guessed (a guessed side could invert the book).`;
+  }
+  return result;
 }
 
-export async function getStudyValues() {
+export async function getStudyValues({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const data = await evaluate(`
     (function() {
       var chart = ${CHART_WIDGET};
@@ -358,7 +414,8 @@ export async function getStudyValues() {
   return { success: true, study_count: data?.length || 0, studies: data || [] };
 }
 
-export async function getPineLines({ study_filter, verbose } = {}) {
+export async function getPineLines({ study_filter, verbose, _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const filter = study_filter || '';
   const raw = await evaluate(buildGraphicsJS('dwglines', 'lines', filter));
   if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
@@ -382,7 +439,8 @@ export async function getPineLines({ study_filter, verbose } = {}) {
   return { success: true, study_count: studies.length, studies };
 }
 
-export async function getPineLabels({ study_filter, max_labels, verbose } = {}) {
+export async function getPineLabels({ study_filter, max_labels, verbose, _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const filter = study_filter || '';
   const raw = await evaluate(buildGraphicsJS('dwglabels', 'labels', filter));
   if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
@@ -402,7 +460,8 @@ export async function getPineLabels({ study_filter, max_labels, verbose } = {}) 
   return { success: true, study_count: studies.length, studies };
 }
 
-export async function getPineTables({ study_filter } = {}) {
+export async function getPineTables({ study_filter, _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const filter = study_filter || '';
   const raw = await evaluate(buildGraphicsJS('dwgtablecells', 'tableCells', filter));
   if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
@@ -430,7 +489,8 @@ export async function getPineTables({ study_filter } = {}) {
   return { success: true, study_count: studies.length, studies };
 }
 
-export async function getPineBoxes({ study_filter, verbose } = {}) {
+export async function getPineBoxes({ study_filter, verbose, _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const filter = study_filter || '';
   const raw = await evaluate(buildGraphicsJS('dwgboxes', 'boxes', filter));
   if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };

@@ -2,10 +2,21 @@ import CDP from 'chrome-remote-interface';
 
 let client = null;
 let targetInfo = null;
+let connecting = null; // in-flight connection promise — shared by concurrent callers
 const CDP_HOST = 'localhost';
 const CDP_PORT = 9222;
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
+
+/**
+ * True if an error looks like a dropped/closed CDP connection (vs a script
+ * error or timeout). Used to decide whether a transparent reconnect+retry is
+ * worth attempting. Exported for testing.
+ */
+export function isConnectionError(err) {
+  const m = String(err?.message || err || '');
+  return /target closed|websocket is not open|websocket connection closed|not opened|inspected target navigated|session with given id not found|target crashed|disconnected|ECONNRESET/i.test(m);
+}
 
 // Known direct API paths discovered via live probing (see PROBE_RESULTS.md).
 // The active-chart paths are derived from a single base literal so the
@@ -97,7 +108,16 @@ export async function getClient() {
   return connect();
 }
 
-export async function connect() {
+export function connect() {
+  // Mutex: concurrent callers share a single in-flight connection attempt
+  // instead of racing into multiple CDP() sockets that overwrite `client`.
+  if (!connecting) {
+    connecting = _doConnect().finally(() => { connecting = null; });
+  }
+  return connecting;
+}
+
+async function _doConnect() {
   let lastError;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
@@ -142,8 +162,23 @@ export async function getTargetInfo() {
 const DEFAULT_EVAL_TIMEOUT = 30000;
 
 export async function evaluate(expression, opts = {}) {
+  try {
+    return await _evaluateOnce(expression, opts);
+  } catch (err) {
+    // Transparent one-shot reconnect: if the socket dropped (tab switch, TV
+    // restart, target navigated), drop the dead client and try once more.
+    if (isConnectionError(err) && !opts._isRetry) {
+      client = null;
+      targetInfo = null;
+      return _evaluateOnce(expression, { ...opts, _isRetry: true });
+    }
+    throw err;
+  }
+}
+
+async function _evaluateOnce(expression, opts = {}) {
   const c = await getClient();
-  const { timeoutMs = DEFAULT_EVAL_TIMEOUT, ...cdpOpts } = opts;
+  const { timeoutMs = DEFAULT_EVAL_TIMEOUT, _isRetry, ...cdpOpts } = opts;
   const evalPromise = c.Runtime.evaluate({
     expression,
     returnByValue: true,

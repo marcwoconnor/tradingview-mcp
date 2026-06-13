@@ -29,9 +29,14 @@ Most tools sanitize their inputs before injecting them into the page (string
 arguments are JSON-escaped via `safeString`, numeric arguments validated via
 `requireFinite`). The **`ui_evaluate`** tool is a deliberate exception: it
 evaluates the caller's JavaScript expression verbatim in the TradingView page
-context, with no escaping. This is an intentional escape hatch for advanced
-automation — treat its input as fully trusted, and prefer a dedicated tool
-whenever one exists.
+context, with no escaping. Because the renderer holds the user's authenticated
+TradingView session, this is the primary data-exfiltration / injection surface
+— especially when the caller is an AI agent that may be steered by untrusted
+content it just read off the chart (e.g. a crafted Pine script name or label).
+
+For that reason `ui_evaluate` is **disabled by default**. Set the environment
+variable `TV_MCP_ALLOW_EVAL=1` to enable it, and only ever pass it code you
+trust. Prefer a dedicated tool whenever one exists.
 
 ## Best Practices for Users
 

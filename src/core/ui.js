@@ -287,7 +287,14 @@ export async function findElement({ query, strategy }) {
   return { success: true, query, strategy: strat, count: results?.length || 0, elements: results || [] };
 }
 
-export async function uiEvaluate({ expression }) {
-  const result = await evaluate(expression);
+export async function uiEvaluate({ expression, _deps } = {}) {
+  // Default-deny: this runs arbitrary JS verbatim in a renderer holding the
+  // user's authenticated TradingView session — the main exfiltration surface.
+  // Require explicit opt-in so a prompt-injected agent can't silently use it.
+  if (!process.env.TV_MCP_ALLOW_EVAL) {
+    throw new Error('ui_evaluate is disabled. It runs arbitrary JavaScript in the TradingView page; set TV_MCP_ALLOW_EVAL=1 to enable it, and only with trusted input.');
+  }
+  const evalFn = _deps?.evaluate || evaluate;
+  const result = await evalFn(expression);
   return { success: true, result };
 }
