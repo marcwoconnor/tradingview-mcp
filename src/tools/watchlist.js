@@ -1,12 +1,9 @@
 import { z } from 'zod';
-import { jsonResult } from './_format.js';
+import { wrap, jsonResult } from './_format.js';
 import * as core from '../core/watchlist.js';
 
 export function registerWatchlistTools(server) {
-  server.tool('watchlist_get', 'Get all symbols from the current TradingView watchlist with last price, change, and change%', {}, async () => {
-    try { return jsonResult(await core.get()); }
-    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
+  server.tool('watchlist_get', 'Get all symbols from the current TradingView watchlist with last price, change, and change%', {}, wrap(core.get));
 
   server.tool('watchlist_add', 'Add a symbol to the TradingView watchlist', {
     symbol: z.string().describe('Symbol to add (e.g., AAPL, BTCUSD, ES1!, NYMEX:CL1!)'),

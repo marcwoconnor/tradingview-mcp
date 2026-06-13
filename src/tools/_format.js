@@ -8,3 +8,23 @@ export function jsonResult(obj, isError = false) {
     ...(isError && { isError: true }),
   };
 }
+
+/**
+ * Wrap a core function as an MCP tool handler.
+ *
+ * Runs the core function with the validated tool arguments, serializes the
+ * result via jsonResult, and converts any thrown error into a uniform
+ * { success: false, error } payload (marked isError). `errorExtra`, if given,
+ * is merged into the error payload — e.g. { hint: '...' }.
+ *
+ * Replaces the try/catch boilerplate that was duplicated across every tool.
+ */
+export function wrap(coreFn, errorExtra) {
+  return async (args) => {
+    try {
+      return jsonResult(await coreFn(args ?? {}));
+    } catch (err) {
+      return jsonResult({ success: false, error: err.message, ...errorExtra }, true);
+    }
+  };
+}
