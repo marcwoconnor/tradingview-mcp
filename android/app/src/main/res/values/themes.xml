@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base theme; Compose drives the actual colors. Use a Material3 splash-friendly base. -->
+    <style name="Theme.ChartMind" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@color/chartmind_background</item>
+        <item name="android:navigationBarColor">@color/chartmind_background</item>
+        <item name="android:windowBackground">@color/chartmind_background</item>
+    </style>
+</resources>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The tv-bridge runs over plain HTTP on your LAN / VPN (no TLS cert on a home
+  machine). Android blocks cleartext by default, so we permit it. The Anthropic
+  API is always reached over HTTPS regardless of this setting.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

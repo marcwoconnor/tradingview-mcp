@@ -14,6 +14,19 @@ Personal AI assistant for your TradingView Desktop charts. Connects Claude Code 
 > [!CAUTION]
 > This tool accesses undocumented internal TradingView APIs via the Electron debug interface. These can change or break without notice in any TradingView update. Pin your TradingView Desktop version if stability matters to you.
 
+## 📱 Control it from your phone (ChartMind for Android)
+
+Want Claude + your charts on the go? The repo now includes **two extras** that turn this
+into a mobile experience without re-implementing TradingView:
+
+- **`tv-bridge`** (`src/bridge/`) — exposes all 84 tools over authenticated HTTP. Start it
+  with `npm run bridge` on the machine running TradingView Desktop.
+- **ChartMind** (`android/`) — a native Kotlin/Compose app where you chat with Claude; it
+  runs the tool-use loop and drives your chart through the bridge (over LAN or a Tailscale VPN).
+
+See **[`android/README.md`](android/README.md)** for setup. The phone is the "remote brain";
+your data and Pine engine stay on TradingView.
+
 ## How It Works (and why it's safe to run)
 
 This tool does not connect to TradingView's servers, modify any TradingView files, or intercept any network traffic. It communicates exclusively with your locally running TradingView Desktop instance via Chrome DevTools Protocol (CDP) — a standard debugging interface built into all Chromium/Electron applications by Google, including VS Code, Slack, and Discord.
