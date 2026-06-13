@@ -248,7 +248,9 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | `chart_get_state` | First call — get symbol, timeframe, all indicator names + IDs | ~500B |
 | `data_get_study_values` | Read current RSI, MACD, BB, EMA values from all indicators | ~500B |
 | `quote_get` | Get latest price, OHLC, volume | ~200B |
-| `data_get_ohlcv` | Get price bars. **Use `summary: true`** for compact stats | 500B (summary) / 8KB (100 bars) |
+| `data_get_ohlcv` | Get price bars (includes an `integrity` block: `forming`, `last_bar_age_seconds`, `gaps`). **Use `summary: true`** for compact stats | 500B (summary) / 8KB (100 bars) |
+| `data_get_indicator` | Get a study's inputs/visibility by entity ID | ~500B |
+| `depth_get` | Order book / DOM (bids, asks, spread; unclassified levels when side is ambiguous) | ~1-2KB |
 
 ### Custom Indicator Data (Pine Drawings)
 
@@ -263,6 +265,15 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 
 **Always use `study_filter`** to target a specific indicator: `study_filter: "Profiler"`.
 
+### Strategy & Backtesting
+
+| Tool | What it does |
+|------|-------------|
+| `data_get_strategy_results` | Raw strategy performance metrics from the Strategy Tester |
+| `data_get_trades` | Trade list from the Strategy Tester |
+| `data_get_equity` | Equity curve data |
+| `data_get_backtest_metrics` | **Normalized** derived metrics: total return, max drawdown (abs + %), per-period Sharpe, volatility, win rate, profit factor, avg win/loss, net profit |
+
 ### Chart Control
 
 | Tool | What it does |
@@ -272,7 +283,7 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `chart_set_type` | Change style (Candles, HeikinAshi, Line, Area, Renko) |
 | `chart_manage_indicator` | Add/remove indicators. **Use full names**: "Relative Strength Index" not "RSI" |
 | `chart_scroll_to_date` | Jump to a date (ISO: "2025-01-15") |
-| `chart_set_visible_range` | Zoom to exact range (unix timestamps) |
+| `chart_get_visible_range` / `chart_set_visible_range` | Read / zoom to an exact date range (unix timestamps) |
 | `symbol_info` / `symbol_search` | Symbol metadata and search |
 | `indicator_set_inputs` / `indicator_toggle_visibility` | Change indicator settings, show/hide |
 
@@ -298,7 +309,7 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | Tool | Step |
 |------|------|
 | `pine_set_source` | 1. Inject code into editor |
-| `pine_smart_compile` | 2. Compile with auto-detection + error check |
+| `pine_smart_compile` | 2. Compile with auto-detection + error check (`pine_compile` for a plain compile) |
 | `pine_get_errors` | 3. Read compilation errors if any |
 | `pine_get_console` | 4. Read log.info() output |
 | `pine_save` | 5. Save to TradingView cloud |
@@ -324,14 +335,37 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | Tool | What it does |
 |------|-------------|
 | `draw_shape` | Draw horizontal_line, trend_line, rectangle, text |
-| `draw_list` / `draw_remove_one` / `draw_clear` | Manage drawings |
+| `draw_list` / `draw_get_properties` / `draw_remove_one` / `draw_clear` | List, inspect, remove, or clear drawings |
 | `alert_create` / `alert_list` / `alert_delete` | Manage price alerts |
 | `capture_screenshot` | Screenshot (regions: full, chart, strategy_tester) |
 | `batch_run` | Run action across multiple symbols/timeframes |
 | `watchlist_get` / `watchlist_add` | Read/modify watchlist |
 | `layout_list` / `layout_switch` | Manage saved layouts |
-| `ui_open_panel` / `ui_click` / `ui_evaluate` | UI automation |
-| `tv_launch` / `tv_health_check` / `tv_discover` | Connection management |
+| `ui_open_panel` | Open/close/toggle panels (pine-editor, strategy-tester, watchlist, alerts, trading) |
+| `ui_click` / `ui_hover` / `ui_mouse_click` | Click/hover by selector, or click raw x/y coordinates |
+| `ui_scroll` / `ui_keyboard` / `ui_type_text` | Scroll, send keystrokes, type text |
+| `ui_find_element` / `ui_fullscreen` | Locate a DOM element, toggle fullscreen |
+| `ui_evaluate` | Run arbitrary JS in the page — **disabled unless `TV_MCP_ALLOW_EVAL=1`** |
+
+### Streaming
+
+| Tool | What it does |
+|------|-------------|
+| `stream_subscribe` | Start a live stream (channels: quote, bars, values, lines, labels, tables, panes); pushes `stream://{id}` resource-update notifications |
+| `stream_poll` | Read the latest streamed value(s) without relying on push |
+| `stream_list` / `stream_unsubscribe` | List or stop subscriptions (`stream_unsubscribe all` stops everything) |
+
+### Connection & Diagnostics
+
+| Tool | What it does |
+|------|-------------|
+| `tv_launch` | Auto-detect and launch TradingView with CDP (Mac/Win/Linux) |
+| `tv_health_check` | Verify the CDP connection and report chart state |
+| `tv_discover` | List which internal API paths are available and their methods |
+| `tv_ui_state` | Report which panels/buttons are open/visible |
+| `tv_diagnose` | **Drift detector** — check which API paths + DOM selectors are present (run when tools return empty/wrong data) |
+
+All tools return `{ success: true, ... }` or `{ success: false, error, error_kind }` where `error_kind` is one of `connection`, `timeout`, `api_missing`, `not_found`, `no_data`, `bad_input`, `eval`.
 
 ## Context Management
 
