@@ -7,15 +7,20 @@ const CDP_PORT = 9222;
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
 
-// Known direct API paths discovered via live probing (see PROBE_RESULTS.md)
+// Known direct API paths discovered via live probing (see PROBE_RESULTS.md).
+// The active-chart paths are derived from a single base literal so the
+// '...value()' expression is defined in exactly one place.
+const ACTIVE_CHART = 'window.TradingViewApi._activeChartWidgetWV.value()';
+const CHART_WIDGET = `${ACTIVE_CHART}._chartWidget`;
 const KNOWN_PATHS = {
-  chartApi: 'window.TradingViewApi._activeChartWidgetWV.value()',
+  chartApi: ACTIVE_CHART,
+  chartWidget: CHART_WIDGET,
   chartWidgetCollection: 'window.TradingViewApi._chartWidgetCollection',
   bottomWidgetBar: 'window.TradingView.bottomWidgetBar',
   replayApi: 'window.TradingViewApi._replayApi',
   alertService: 'window.TradingViewApi._alertService',
   chartApiInstance: 'window.ChartApiInstance',
-  mainSeriesBars: 'window.TradingViewApi._activeChartWidgetWV.value()._chartWidget.model().mainSeries().bars()',
+  mainSeriesBars: `${CHART_WIDGET}.model().mainSeries().bars()`,
   // Phase 1: Strategy data — model().dataSources() → find strategy → .performance().value(), .ordersData(), .reportData()
   strategyStudy: 'chart._chartWidget.model().model().dataSources()',
   // Phase 2: Layouts — getSavedCharts(cb), loadChartFromServer(id)
@@ -27,6 +32,9 @@ const KNOWN_PATHS = {
 };
 
 export { KNOWN_PATHS };
+
+/** Resolve after `ms` milliseconds. Centralizes the setTimeout-Promise idiom. */
+export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Sanitize a string for safe interpolation into JavaScript code evaluated via CDP.
@@ -103,14 +111,36 @@ export async function getTargetInfo() {
   return targetInfo;
 }
 
+const DEFAULT_EVAL_TIMEOUT = 30000;
+
 export async function evaluate(expression, opts = {}) {
   const c = await getClient();
-  const result = await c.Runtime.evaluate({
+  const { timeoutMs = DEFAULT_EVAL_TIMEOUT, ...cdpOpts } = opts;
+  const evalPromise = c.Runtime.evaluate({
     expression,
     returnByValue: true,
-    awaitPromise: opts.awaitPromise ?? false,
-    ...opts,
+    awaitPromise: cdpOpts.awaitPromise ?? false,
+    ...cdpOpts,
   });
+  // If the timeout wins the race, the eval promise may still settle later —
+  // attach a no-op handler so a late rejection isn't an unhandled rejection.
+  evalPromise.catch(() => {});
+
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`CDP evaluate timed out after ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+  });
+
+  let result;
+  try {
+    result = await Promise.race([evalPromise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+
   if (result.exceptionDetails) {
     const msg = result.exceptionDetails.exception?.description
       || result.exceptionDetails.text

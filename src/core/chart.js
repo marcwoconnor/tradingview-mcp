@@ -1,16 +1,43 @@
 /**
  * Core chart control logic.
  */
-import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, safeString, requireFinite } from '../connection.js';
+import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, safeString, requireFinite, sleep as _sleep, KNOWN_PATHS } from '../connection.js';
 import { waitForChartReady as _waitForChartReady } from '../wait.js';
 
-const CHART_API = 'window.TradingViewApi._activeChartWidgetWV.value()';
+const CHART_API = KNOWN_PATHS.chartApi;
+
+/**
+ * Build the injected JS that zooms the chart to cover the bar range whose
+ * timestamps fall within [from, to] (unix seconds). Shared by setVisibleRange
+ * and scrollToDate. `from`/`to` must be finite numbers (caller-validated).
+ */
+function buildZoomToRangeJS(from, to) {
+  return `
+    (function() {
+      var chart = ${CHART_API};
+      var m = chart._chartWidget.model();
+      var ts = m.timeScale();
+      var bars = m.mainSeries().bars();
+      var startIdx = bars.firstIndex();
+      var endIdx = bars.lastIndex();
+      var fromIdx = startIdx, toIdx = endIdx;
+      for (var i = startIdx; i <= endIdx; i++) {
+        var v = bars.valueAt(i);
+        if (v && v[0] >= ${from} && fromIdx === startIdx) fromIdx = i;
+        if (v && v[0] <= ${to}) toIdx = i;
+      }
+      ts.zoomToBarsRange(fromIdx, toIdx);
+    })()
+  `;
+}
 
 function _resolve(deps) {
   return {
     evaluate: deps?.evaluate || _evaluate,
     evaluateAsync: deps?.evaluateAsync || _evaluateAsync,
     waitForChartReady: deps?.waitForChartReady || _waitForChartReady,
+    sleep: deps?.sleep || _sleep,
+    fetch: deps?.fetch || globalThis.fetch,
   };
 }
 
@@ -85,7 +112,7 @@ export async function setType({ chart_type, _deps }) {
 }
 
 export async function manageIndicator({ action, indicator, entity_id, inputs: inputsRaw, _deps }) {
-  const { evaluate } = _resolve(_deps);
+  const { evaluate, sleep } = _resolve(_deps);
   const inputs = inputsRaw ? (typeof inputsRaw === 'string' ? JSON.parse(inputsRaw) : inputsRaw) : undefined;
 
   if (action === 'add') {
@@ -97,7 +124,7 @@ export async function manageIndicator({ action, indicator, entity_id, inputs: in
         chart.createStudy(${safeString(indicator)}, false, false, ${JSON.stringify(inputArr)});
       })()
     `);
-    await new Promise(r => setTimeout(r, 1500));
+    await sleep(1500);
     const after = await evaluate(`${CHART_API}.getAllStudies().map(function(s) { return s.id; })`);
     const newIds = (after || []).filter(id => !(before || []).includes(id));
     return { success: newIds.length > 0, action: 'add', indicator, entity_id: newIds[0] || null, new_study_count: newIds.length };
@@ -115,7 +142,8 @@ export async function manageIndicator({ action, indicator, entity_id, inputs: in
   }
 }
 
-export async function getVisibleRange() {
+export async function getVisibleRange({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const result = await evaluate(`
     (function() {
       var chart = ${CHART_API};
@@ -126,27 +154,11 @@ export async function getVisibleRange() {
 }
 
 export async function setVisibleRange({ from, to, _deps }) {
-  const { evaluate } = _resolve(_deps);
+  const { evaluate, sleep } = _resolve(_deps);
   const f = requireFinite(from, 'from');
   const t = requireFinite(to, 'to');
-  await evaluate(`
-    (function() {
-      var chart = ${CHART_API};
-      var m = chart._chartWidget.model();
-      var ts = m.timeScale();
-      var bars = m.mainSeries().bars();
-      var startIdx = bars.firstIndex();
-      var endIdx = bars.lastIndex();
-      var fromIdx = startIdx, toIdx = endIdx;
-      for (var i = startIdx; i <= endIdx; i++) {
-        var v = bars.valueAt(i);
-        if (v && v[0] >= ${f} && fromIdx === startIdx) fromIdx = i;
-        if (v && v[0] <= ${t}) toIdx = i;
-      }
-      ts.zoomToBarsRange(fromIdx, toIdx);
-    })()
-  `);
-  await new Promise(r => setTimeout(r, 500));
+  await evaluate(buildZoomToRangeJS(f, t));
+  await sleep(500);
   const actual = await evaluate(`
     (function() {
       var chart = ${CHART_API};
@@ -157,7 +169,8 @@ export async function setVisibleRange({ from, to, _deps }) {
   return { success: true, requested: { from, to }, actual: actual || { from: 0, to: 0 } };
 }
 
-export async function scrollToDate({ date }) {
+export async function scrollToDate({ date, _deps }) {
+  const { evaluate, sleep } = _resolve(_deps);
   let timestamp;
   if (/^\d+$/.test(date)) timestamp = Number(date);
   else timestamp = Math.floor(new Date(date).getTime() / 1000);
@@ -175,28 +188,13 @@ export async function scrollToDate({ date }) {
   const from = timestamp - halfWindow;
   const to = timestamp + halfWindow;
 
-  await evaluate(`
-    (function() {
-      var chart = ${CHART_API};
-      var m = chart._chartWidget.model();
-      var ts = m.timeScale();
-      var bars = m.mainSeries().bars();
-      var startIdx = bars.firstIndex();
-      var endIdx = bars.lastIndex();
-      var fromIdx = startIdx, toIdx = endIdx;
-      for (var i = startIdx; i <= endIdx; i++) {
-        var v = bars.valueAt(i);
-        if (v && v[0] >= ${from} && fromIdx === startIdx) fromIdx = i;
-        if (v && v[0] <= ${to}) toIdx = i;
-      }
-      ts.zoomToBarsRange(fromIdx, toIdx);
-    })()
-  `);
-  await new Promise(r => setTimeout(r, 500));
+  await evaluate(buildZoomToRangeJS(from, to));
+  await sleep(500);
   return { success: true, date, centered_on: timestamp, resolution, window: { from, to } };
 }
 
-export async function symbolInfo() {
+export async function symbolInfo({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const result = await evaluate(`
     (function() {
       var chart = ${CHART_API};
@@ -211,7 +209,8 @@ export async function symbolInfo() {
   return { success: true, ...result };
 }
 
-export async function symbolSearch({ query, type }) {
+export async function symbolSearch({ query, type, _deps }) {
+  const { fetch } = _resolve(_deps);
   // Use TradingView's public symbol search REST API (works without auth)
   const params = new URLSearchParams({
     text: query,

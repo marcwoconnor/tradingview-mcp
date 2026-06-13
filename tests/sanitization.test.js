@@ -7,8 +7,8 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeString, requireFinite } from '../src/connection.js';
-import { setSymbol, setTimeframe, setType, manageIndicator, setVisibleRange } from '../src/core/chart.js';
-import { drawShape } from '../src/core/drawing.js';
+import { setSymbol, setTimeframe, setType, manageIndicator, setVisibleRange, getVisibleRange, scrollToDate, symbolInfo, symbolSearch } from '../src/core/chart.js';
+import { drawShape, listDrawings, getProperties, removeOne, clearAll } from '../src/core/drawing.js';
 
 // ── Mock helpers ─────────────────────────────────────────────────────────
 
@@ -27,6 +27,8 @@ function mockDeps(overrides = {}) {
       evaluateAsync: evaluate,
       waitForChartReady: async () => true,
       getChartApi: async () => 'window.__api',
+      sleep: async () => {}, // no real delay in tests
+      fetch: async () => ({ ok: true, json: async () => ({ symbols: [] }) }),
       ...overrides,
     },
     evaluate,
@@ -226,6 +228,58 @@ describe('chart.js — sanitized evaluate calls', () => {
   });
 });
 
+// ── chart.js — dependency injection coverage ─────────────────────────────
+
+describe('chart.js — DI coverage for read/scroll helpers', () => {
+  it('getVisibleRange routes through injected evaluate', async () => {
+    const evaluate = async () => ({ visible_range: { from: 1, to: 2 }, bars_range: {} });
+    const r = await getVisibleRange({ _deps: { evaluate } });
+    assert.equal(r.success, true);
+    assert.deepEqual(r.visible_range, { from: 1, to: 2 });
+  });
+
+  it('scrollToDate uses injected evaluate + sleep (no real delay)', async () => {
+    const calls = [];
+    const evaluate = async (expr) => { calls.push(expr); return 'D'; };
+    let slept = false;
+    const r = await scrollToDate({ date: '2024-01-15', _deps: { evaluate, sleep: async () => { slept = true; } } });
+    assert.equal(r.success, true);
+    assert.equal(r.centered_on, Math.floor(new Date('2024-01-15').getTime() / 1000));
+    assert.ok(calls.some(c => c.includes('zoomToBarsRange')), 'zoomToBarsRange evaluated');
+    assert.ok(slept, 'injected sleep was used instead of a real timer');
+  });
+
+  it('scrollToDate rejects an unparseable date', async () => {
+    await assert.rejects(
+      () => scrollToDate({ date: 'not-a-date', _deps: { evaluate: async () => 'D', sleep: async () => {} } }),
+      /Could not parse date/,
+    );
+  });
+
+  it('symbolInfo routes through injected evaluate', async () => {
+    const evaluate = async () => ({ symbol: 'AAPL', exchange: 'NASDAQ' });
+    const r = await symbolInfo({ _deps: { evaluate } });
+    assert.equal(r.success, true);
+    assert.equal(r.symbol, 'AAPL');
+  });
+
+  it('symbolSearch routes through injected fetch and strips <em> tags', async () => {
+    const fetch = async () => ({ ok: true, json: async () => ({ symbols: [{ symbol: '<em>AA</em>PL', description: 'Apple', exchange: 'NASDAQ', type: 'stock' }] }) });
+    const r = await symbolSearch({ query: 'AAPL', _deps: { fetch } });
+    assert.equal(r.success, true);
+    assert.equal(r.results[0].symbol, 'AAPL');
+    assert.equal(r.results[0].full_name, 'NASDAQ:AAPL');
+  });
+
+  it('symbolSearch throws on a non-ok response', async () => {
+    const fetch = async () => ({ ok: false, status: 503 });
+    await assert.rejects(
+      () => symbolSearch({ query: 'X', _deps: { fetch } }),
+      /503/,
+    );
+  });
+});
+
 // ── drawing.js — safeString + requireFinite ──────────────────────────────
 
 describe('drawing.js — sanitized evaluate calls', () => {
@@ -282,6 +336,39 @@ describe('drawing.js — sanitized evaluate calls', () => {
     assert.ok(call, 'createMultipointShape called');
     assert.ok(call.includes('"trend_line"'), 'shape name via safeString');
   });
+
+  // Regression: listDrawings/getProperties/removeOne/clearAll previously
+  // referenced bare evaluate/getChartApi (not imported) and threw ReferenceError.
+  it('listDrawings routes through injected deps (no ReferenceError)', async () => {
+    const _deps = { evaluate: async () => [{ id: 's1', name: 'Line' }], getChartApi: async () => 'window.__api' };
+    const r = await listDrawings({ _deps });
+    assert.equal(r.success, true);
+    assert.equal(r.count, 1);
+  });
+
+  it('clearAll routes through injected deps (no ReferenceError)', async () => {
+    let cleared = false;
+    const _deps = { evaluate: async (expr) => { if (expr.includes('removeAllShapes')) cleared = true; }, getChartApi: async () => 'window.__api' };
+    const r = await clearAll({ _deps });
+    assert.equal(r.success, true);
+    assert.ok(cleared, 'removeAllShapes evaluated');
+  });
+
+  it('removeOne uses safeString for entity_id and routes through deps', async () => {
+    const calls = [];
+    const _deps = { evaluate: async (expr) => { calls.push(expr); return { removed: true, entity_id: 'abc', remaining_shapes: 0 }; }, getChartApi: async () => 'window.__api' };
+    const r = await removeOne({ entity_id: 'abc', _deps });
+    assert.equal(r.success, true);
+    assert.ok(calls.some(c => c.includes('"abc"')), 'entity_id passed via safeString');
+  });
+
+  it('getProperties uses safeString for entity_id and routes through deps', async () => {
+    const calls = [];
+    const _deps = { evaluate: async (expr) => { calls.push(expr); return { entity_id: 'xyz', visible: true }; }, getChartApi: async () => 'window.__api' };
+    const r = await getProperties({ entity_id: 'xyz', _deps });
+    assert.equal(r.success, true);
+    assert.ok(calls.some(c => c.includes('"xyz"')), 'entity_id passed via safeString');
+  });
 });
 
 // ── Source-level audit ───────────────────────────────────────────────────
@@ -318,11 +405,11 @@ describe('source audit — no unsafe interpolation patterns', () => {
 describe('path traversal prevention', () => {
   it('capture.js strips path separators from filename', () => {
     const source = readFileSync(new URL('../src/core/capture.js', import.meta.url), 'utf8');
-    assert.ok(source.includes(".replace(/[\\/\\\\]/g, '_')"));
+    assert.ok(source.includes(".replace(/[/\\\\]/g, '_')"));
   });
 
   it('batch.js strips path separators from filename', () => {
     const source = readFileSync(new URL('../src/core/batch.js', import.meta.url), 'utf8');
-    assert.ok(source.includes(".replace(/[\\/\\\\]/g, '_')"));
+    assert.ok(source.includes(".replace(/[/\\\\]/g, '_')"));
   });
 });
