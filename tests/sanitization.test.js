@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { safeString, requireFinite } from '../src/connection.js';
 import { setSymbol, setTimeframe, setType, manageIndicator, setVisibleRange, getVisibleRange, scrollToDate, symbolInfo, symbolSearch } from '../src/core/chart.js';
 import { drawShape, listDrawings, getProperties, removeOne, clearAll } from '../src/core/drawing.js';
+import { normalizeResolution } from '../src/wait.js';
 
 // ── Mock helpers ─────────────────────────────────────────────────────────
 
@@ -277,6 +278,32 @@ describe('chart.js — DI coverage for read/scroll helpers', () => {
       () => symbolSearch({ query: 'X', _deps: { fetch } }),
       /503/,
     );
+  });
+});
+
+// ── wait.js — resolution normalization ───────────────────────────────────
+
+describe('normalizeResolution() — timeframe equivalence', () => {
+  it('treats "D" and "1D" as equal (daily/weekly/monthly)', () => {
+    assert.equal(normalizeResolution('1D'), normalizeResolution('D'));
+    assert.equal(normalizeResolution('1W'), normalizeResolution('W'));
+    assert.equal(normalizeResolution('1M'), normalizeResolution('M'));
+    assert.equal(normalizeResolution('1D'), 'D');
+  });
+
+  it('leaves intraday minute resolutions unchanged', () => {
+    assert.equal(normalizeResolution('15'), '15');
+    assert.equal(normalizeResolution('60'), '60');
+  });
+
+  it('is case-insensitive and trims', () => {
+    assert.equal(normalizeResolution('1d'), 'D');
+    assert.equal(normalizeResolution(' 15 '), '15');
+  });
+
+  it('handles null/empty', () => {
+    assert.equal(normalizeResolution(null), '');
+    assert.equal(normalizeResolution(''), '');
   });
 });
 

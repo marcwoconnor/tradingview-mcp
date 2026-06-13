@@ -3,7 +3,7 @@
  * All functions accept plain options objects and return plain JS objects.
  * They throw on error (callers catch and format).
  */
-import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import { evaluate, evaluateAsync, getClient, fetchWithTimeout } from '../connection.js';
 
 // ── Monaco finder (injected into TV page) ──
 const FIND_MONACO = `
@@ -187,7 +187,7 @@ export async function check({ source }) {
   const formData = new URLSearchParams();
   formData.append('source', source);
 
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     'https://pine-facade.tradingview.com/pine-facade/translate_light?user_name=Guest&pine_id=00000000-0000-0000-0000-000000000000',
     {
       method: 'POST',

@@ -1,9 +1,18 @@
-import { evaluate } from './connection.js';
+import { evaluate, sleep, KNOWN_PATHS } from './connection.js';
 
 const DEFAULT_TIMEOUT = 10000;
 const POLL_INTERVAL = 200;
 
-export async function waitForChartReady(expectedSymbol = null, _expectedTf = null, timeout = DEFAULT_TIMEOUT) {
+/**
+ * Normalize a TradingView resolution for comparison. TradingView's
+ * resolution() returns "1D"/"1W"/"1M" for daily/weekly/monthly, while callers
+ * often pass "D"/"W"/"M"; intraday is the minute count either way ("15", "60").
+ */
+export function normalizeResolution(res) {
+  return String(res || '').toUpperCase().trim().replace(/^1(?=[DWM]$)/, '');
+}
+
+export async function waitForChartReady(expectedSymbol = null, expectedTf = null, timeout = DEFAULT_TIMEOUT) {
   const start = Date.now();
   let lastBarCount = -1;
   let stableCount = 0;
@@ -29,26 +38,37 @@ export async function waitForChartReady(expectedSymbol = null, _expectedTf = nul
           || document.querySelector('[class*="title"] [class*="apply-common-tooltip"]');
         var currentSymbol = symbolEl ? symbolEl.textContent.trim() : '';
 
-        return { isLoading: !!isLoading, barCount: barCount, currentSymbol: currentSymbol };
+        // Read the chart's current resolution from the API
+        var resolution = '';
+        try { resolution = String(${KNOWN_PATHS.chartApi}.resolution() || ''); } catch (e) {}
+
+        return { isLoading: !!isLoading, barCount: barCount, currentSymbol: currentSymbol, resolution: resolution };
       })()
     `);
 
     if (!state) {
-      await new Promise(r => setTimeout(r, POLL_INTERVAL));
+      await sleep(POLL_INTERVAL);
       continue;
     }
 
     // Not ready if still loading
     if (state.isLoading) {
       stableCount = 0;
-      await new Promise(r => setTimeout(r, POLL_INTERVAL));
+      await sleep(POLL_INTERVAL);
       continue;
     }
 
     // Check symbol match if expected
     if (expectedSymbol && state.currentSymbol && !state.currentSymbol.toUpperCase().includes(expectedSymbol.toUpperCase())) {
       stableCount = 0;
-      await new Promise(r => setTimeout(r, POLL_INTERVAL));
+      await sleep(POLL_INTERVAL);
+      continue;
+    }
+
+    // Check resolution match if expected (the chart hasn't switched timeframe yet)
+    if (expectedTf && state.resolution && normalizeResolution(state.resolution) !== normalizeResolution(expectedTf)) {
+      stableCount = 0;
+      await sleep(POLL_INTERVAL);
       continue;
     }
 
@@ -64,9 +84,9 @@ export async function waitForChartReady(expectedSymbol = null, _expectedTf = nul
       return true;
     }
 
-    await new Promise(r => setTimeout(r, POLL_INTERVAL));
+    await sleep(POLL_INTERVAL);
   }
 
-  // Timeout — return true anyway, caller should verify
+  // Timed out before the chart stabilized — caller should verify state.
   return false;
 }
