@@ -36,6 +36,29 @@ export { KNOWN_PATHS };
 /** Resolve after `ms` milliseconds. Centralizes the setTimeout-Promise idiom. */
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const DEFAULT_FETCH_TIMEOUT = 15000;
+
+/**
+ * fetch() with an AbortController timeout so a stalled HTTP request can't hang
+ * forever. Pass opts.timeoutMs to override (default 15s); all other opts are
+ * forwarded to fetch.
+ */
+export async function fetchWithTimeout(url, opts = {}) {
+  const { timeoutMs = DEFAULT_FETCH_TIMEOUT, ...rest } = opts;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...rest, signal: controller.signal });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error(`Request to ${url} timed out after ${timeoutMs}ms`, { cause: err });
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Sanitize a string for safe interpolation into JavaScript code evaluated via CDP.
  * Uses JSON.stringify to produce a properly escaped JS string literal (with quotes).
@@ -50,6 +73,11 @@ export function safeString(str) {
  * Prevents corrupt values from reaching TradingView APIs that persist to cloud state.
  */
 export function requireFinite(value, name) {
+  // Reject null/'' explicitly: Number() coerces both to 0 (finite), which would
+  // silently turn a missing value into a real coordinate. Treat them like undefined.
+  if (value === null || value === '') {
+    throw new Error(`${name} must be a finite number, got: ${value}`);
+  }
   const n = Number(value);
   if (!Number.isFinite(n)) throw new Error(`${name} must be a finite number, got: ${value}`);
   return n;
@@ -96,7 +124,7 @@ export async function connect() {
 }
 
 async function findChartTarget() {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const resp = await fetchWithTimeout(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
   // Prefer targets with tradingview.com/chart in the URL
   return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))

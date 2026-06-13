@@ -1,7 +1,7 @@
 /**
  * Core chart control logic.
  */
-import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, safeString, requireFinite, sleep as _sleep, KNOWN_PATHS } from '../connection.js';
+import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, safeString, requireFinite, sleep as _sleep, fetchWithTimeout as _fetchWithTimeout, KNOWN_PATHS } from '../connection.js';
 import { waitForChartReady as _waitForChartReady } from '../wait.js';
 
 const CHART_API = KNOWN_PATHS.chartApi;
@@ -37,7 +37,7 @@ function _resolve(deps) {
     evaluateAsync: deps?.evaluateAsync || _evaluateAsync,
     waitForChartReady: deps?.waitForChartReady || _waitForChartReady,
     sleep: deps?.sleep || _sleep,
-    fetch: deps?.fetch || globalThis.fetch,
+    fetch: deps?.fetch || _fetchWithTimeout,
   };
 }
 

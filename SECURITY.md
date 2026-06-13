@@ -23,6 +23,16 @@ This project connects to a locally running TradingView Desktop instance via Chro
 - Chrome DevTools Protocol security (report to Google/Chromium)
 - Claude Code or MCP SDK security (report to Anthropic)
 
+## Arbitrary Code Execution by Design
+
+Most tools sanitize their inputs before injecting them into the page (string
+arguments are JSON-escaped via `safeString`, numeric arguments validated via
+`requireFinite`). The **`ui_evaluate`** tool is a deliberate exception: it
+evaluates the caller's JavaScript expression verbatim in the TradingView page
+context, with no escaping. This is an intentional escape hatch for advanced
+automation — treat its input as fully trusted, and prefer a dedicated tool
+whenever one exists.
+
 ## Best Practices for Users
 
 - Only run TradingView with `--remote-debugging-port=9222` on localhost
