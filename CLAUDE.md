@@ -59,6 +59,13 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 5. `replay_status` → check position, P&L, current date
 6. `replay_stop` → return to realtime
 
+### "Analyze a strategy / backtest"
+A strategy indicator must be on the chart (Strategy Tester populated).
+1. `data_get_backtest_metrics` → normalized summary: total return, max drawdown (abs + %), per-period Sharpe, volatility, win rate, profit factor, avg win/loss (best starting point)
+2. `data_get_strategy_results` → raw performance metrics from the Strategy Tester
+3. `data_get_trades` → individual trade list (capped at 20)
+4. `data_get_equity` → equity curve points
+
 ### "Screen multiple symbols"
 - `batch_run` with `symbols: ["ES1!", "NQ1!", "YM1!"]` and `action: "screenshot"` or `"get_ohlcv"`
 
@@ -121,12 +128,15 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 ## Tool Conventions
 
 - All tools return `{ success: true/false, ... }`
+- On failure: `{ success: false, error, error_kind }` where `error_kind` ∈ `connection` (TradingView not reachable — try `tv_launch`), `timeout`, `api_missing` (likely a TV update — run `tv_diagnose`), `not_found`, `no_data` (chart still loading), `bad_input`, `eval`
 - Entity IDs (from `chart_get_state`) are session-specific — don't cache across sessions
 - Pine indicators must be **visible** on chart for pine graphics tools to read their data
 - `chart_manage_indicator` requires **full indicator names**: "Relative Strength Index" not "RSI", "Moving Average Exponential" not "EMA", "Bollinger Bands" not "BB"
-- Screenshots save to `screenshots/` directory with timestamps
-- OHLCV capped at 500 bars, trades at 20 per request
+- Screenshots save to `screenshots/` directory with timestamps (override with `TV_SCREENSHOT_DIR`)
+- OHLCV capped at 500 bars, trades at 20 per request; `data_get_ohlcv` includes an `integrity` block (`forming`, `last_bar_age_seconds`, `gaps`) — don't trust a `forming` last bar as closed
 - Pine labels capped at 50 per study by default (pass `max_labels` to override)
+- `ui_evaluate` is disabled unless `TV_MCP_ALLOW_EVAL=1` (it runs arbitrary JS in the page)
+- Config via env: `TV_CDP_HOST`, `TV_CDP_PORT`, `TV_EVAL_TIMEOUT_MS`, `TV_FETCH_TIMEOUT_MS`, `TV_SCREENSHOT_DIR`, `TV_MCP_ALLOW_EVAL`
 
 ## Architecture
 
